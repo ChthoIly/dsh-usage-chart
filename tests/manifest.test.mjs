@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, readFile } from 'node:fs/promises'
+import { access, readdir, readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
@@ -36,13 +36,17 @@ test('client peer ranges admit DSH 0.1.x and 0.2.x runtimes', () => {
 })
 
 test('built client bundle stays free of the retired client runtime', async () => {
-  const [bundle, clientTypes] = await Promise.all([
-    readFile(new URL('../lib/client.js', import.meta.url), 'utf8'),
-    readFile(new URL('../lib/types/client/index.d.ts', import.meta.url), 'utf8'),
-  ])
+  const bundle = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
   assert.ok(bundle.includes('__ModuleLoader__.load'), 'client bundle must register through the DSH module loader')
   assert.ok(!/require\(['"]@deepseek-ai\/dsh-client-runtime/.test(bundle), 'client bundle must not require the retired dsh-client-runtime package')
-  assert.ok(!/from ['"]@deepseek-ai\/dsh-client-runtime/.test(clientTypes), 'published client types must not import the retired dsh-client-runtime package')
+  // 扫描全部发布的 client 声明文件，而不只是入口
+  const typesDir = new URL('../lib/types/client/', import.meta.url)
+  const declarations = (await readdir(typesDir, { recursive: true })).filter((file) => file.endsWith('.d.ts'))
+  assert.ok(declarations.length > 1, 'client declarations must be emitted')
+  for (const file of declarations) {
+    const text = await readFile(new URL(file, typesDir), 'utf8')
+    assert.ok(!/from ['"]@deepseek-ai\/dsh-client-runtime/.test(text), `${file} must not import the retired dsh-client-runtime package`)
+  }
 })
 
 test('all exported runtime and type files exist after build', async () => {

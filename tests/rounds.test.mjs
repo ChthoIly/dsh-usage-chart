@@ -122,6 +122,121 @@ test('foldRounds uses assistant/message.stream timing on DSH 0.2.x logs (no assi
   assert.equal(rounds[0].userSource, 'agent-message')
 })
 
+test('foldRounds counts DSH 0.2.x failed-attempt usage and keeps retries separate', () => {
+  const usageChunk = (time, usage) => ({ type: 'chunk', time, chunk: { type: 'usage', usage } })
+  // 失败的一轮：只有 assistant/attempt，没有 assistant/message
+  const failed = stream()
+  failed.push('turn/start', 1_000, { turn: 1 })
+  failed.push('step/start', 1_005, { turn: 1, step: 0 })
+  failed.push('assistant/attempt', 4_000, {
+    turn: 1,
+    step: 0,
+    stream: [
+      { type: 'text-chunks', time0: 2_000, dt: [], texts: ['partial'] },
+      usageChunk(3_900, { inputTokens: 100, outputTokens: 50 }),
+    ],
+  })
+  failed.push('turn/end', 4_100, { turn: 1, reason: { kind: 'error' } })
+  const one = foldRounds(failed.events, flashResolver())
+  assert.deepEqual(one.totals, { uncachedInputTokens: 100, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 })
+  assert.equal(one.rounds.length, 1)
+  assert.equal(one.rounds[0].endReason, 'error')
+  assert.equal(one.rounds[0].ttftMs, 1_000)
+
+  // 同一步骤先失败后重试成功：两次请求分别计费，重试不替换失败尝试
+  const retried = stream()
+  retried.push('turn/start', 1_000, { turn: 1 })
+  retried.push('step/start', 1_005, { turn: 1, step: 0 })
+  retried.push('assistant/attempt', 3_000, { turn: 1, step: 0, stream: [usageChunk(2_900, { inputTokens: 100, outputTokens: 10 })] })
+  retried.push('assistant/message', 6_000, { turn: 1, step: 0, usage: { inputTokens: 120, outputTokens: 40, cacheReadTokens: 30 } })
+  retried.push('turn/end', 6_100, { turn: 1, reason: { kind: 'completed' } })
+  const two = foldRounds(retried.events, flashResolver())
+  assert.deepEqual(two.totals, { uncachedInputTokens: 220, outputTokens: 50, cacheReadTokens: 30, cacheWriteTokens: 0 })
+  assert.deepEqual(two.rounds[0].buckets, two.totals)
+})
+
+test('foldRounds measures 0.2.x TPS over streaming time only, excluding tool gaps between steps', () => {
+  const s = stream()
+  s.push('turn/start', 1_000, { turn: 1 })
+  // 步骤 0：2000→3000 流式输出 30 token，随后工具执行到 10000
+  s.push('assistant/message', 3_100, {
+    turn: 1, step: 0, usage: { inputTokens: 10, outputTokens: 30 },
+    stream: [{ type: 'text-chunks', time0: 2_000, dt: [1_000], texts: ['a', 'b'] }],
+  })
+  // 步骤 1：10000→11000 流式输出 20 token
+  s.push('assistant/message', 11_100, {
+    turn: 1, step: 1, usage: { inputTokens: 10, outputTokens: 20 },
+    stream: [{ type: 'text-chunks', time0: 10_000, dt: [1_000], texts: ['c', 'd'] }],
+  })
+  s.push('turn/end', 11_200, { turn: 1, reason: { kind: 'completed' } })
+  const { rounds } = foldRounds(s.events, flashResolver())
+  assert.equal(rounds[0].ttftMs, 1_000)
+  // 50 token / (1s + 1s) = 25 tok/s；墙钟窗口（2000→11000）会误报 5.6 tok/s
+  assert.equal(rounds[0].outputTps, 25)
+})
+
+test('foldRounds reads 0.2.x raw delta chunks, all named tool-call fragments, and stream-only usage', () => {
+  const s = stream()
+  s.push('turn/start', 1_000, { turn: 1 })
+  s.push('assistant/message', 9_000, {
+    turn: 1,
+    step: 0,
+    // 没有 data.usage：用量只在流里
+    stream: [
+      { type: 'chunk', time: 1_500, chunk: { type: 'block-start', index: 0, blockType: 'tool-call' } },
+      // 累加器无法合并的原始 tool-call-delta（id 为空）按 chunk 落盘，仍是首个 token
+      { type: 'chunk', time: 2_000, chunk: { type: 'tool-call-delta', id: '', name: 'run_code', argumentsDelta: '' } },
+      // 带 name 的段：每个片段都携带工具名，末尾空参数片段也算 token
+      { type: 'tool-call-chunks', time0: 3_000, dt: [500, 500], id: 'call-1', index: 0, name: 'run_code', args: ['{"a"', ':1}', ''] },
+      { type: 'chunk', time: 4_100, chunk: { type: 'usage', usage: { inputTokens: 10, outputTokens: 20 } } },
+      { type: 'chunk', time: 4_200, chunk: { type: 'finish' } },
+    ],
+  })
+  s.push('turn/end', 9_500, { turn: 1, reason: { kind: 'completed' } })
+  const { totals, rounds } = foldRounds(s.events, flashResolver())
+  assert.deepEqual(totals, { uncachedInputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0 })
+  assert.equal(rounds[0].ttftMs, 1_000)
+  // 首个 token 2000，最后一个 token 4000（第三个片段）
+  assert.equal(rounds[0].outputTps, 20 / ((4_000 - 2_000) / 1_000))
+})
+
+test('foldRounds normalizes DSH 0.2.x object user/message sources', () => {
+  const s = stream()
+  const turn = (n, t, kind) => {
+    s.push('turn/start', t, { turn: n })
+    s.push('user/message', t + 1, { turn: n, source: { kind } })
+    // 运行时上下文注入跟在真实来源之后，不应改写本轮来源
+    s.push('user/message', t + 2, { turn: n, source: { kind: 'time-context' } })
+    s.push('assistant/message', t + 50, { turn: n, step: 0, usage: { inputTokens: 1, outputTokens: 1 } })
+    s.push('turn/end', t + 60, { turn: n, reason: { kind: 'completed' } })
+  }
+  turn(1, 1_000, 'user')
+  turn(2, 2_000, 'tool-jobs')
+  turn(3, 3_000, 'agent-message')
+  turn(4, 4_000, 'user-question-reply')
+  const { rounds } = foldRounds(s.events, flashResolver())
+  assert.deepEqual(rounds.map((r) => r.userSource), ['human', 'agent.tool-jobs', 'agent-message', 'human'])
+})
+
+test('foldRounds treats a name-bearing tool-call delta with empty args as the first token', () => {
+  const s = stream()
+  s.push('turn/start', 1_000, { turn: 1 })
+  s.push('assistant/message', 9_000, {
+    turn: 1,
+    step: 0,
+    usage: { inputTokens: 10, outputTokens: 20 },
+    stream: [
+      { type: 'chunk', time: 1_500, chunk: { type: 'block-start', index: 0, blockType: 'tool-call' } },
+      { type: 'tool-call-chunks', time0: 3_000, dt: [500, 500], id: 'call-1', index: 0, name: 'run_code', args: ['', '{"a"', ':1}'] },
+    ],
+  })
+  s.push('turn/end', 9_500, { turn: 1, reason: { kind: 'completed' } })
+  const { rounds } = foldRounds(s.events, flashResolver())
+  // 工具名 delta 在 3000 就是首个 token（不等到 3500 的参数片段，也不回退到 9000 的 usage）
+  assert.equal(rounds[0].ttftMs, 2_000)
+  assert.equal(rounds[0].outputTps, 20 / ((4_000 - 3_000) / 1_000))
+})
+
 test('foldRounds bills peak vs off-peak rounds by their start time', () => {
   const s = stream()
   // 高峰轮：开始于北京时间 10:00（UTC 02:00）
