@@ -4,8 +4,8 @@
  *
  *  - lib/index.js  —— host 半区（Node ESM，加载器按 package.json main 导入）
  *  - lib/client.js —— client 半区（浏览器 CJS 工厂包，`window.__ModuleLoader__.load`
- *                     注册；外部依赖 = DSH web 的 PLATFORM_MODULES + runtime/client 豁免，
- *                     与 monorepo packages/client/tsdown.client.ts 的规则保持一致）
+ *                     注册；外部依赖 = DSH web 0.1.x/0.2.x 浏览器共享模块表，
+ *                     与官方 client 构建同一套 external 规则）
  *
  * 用法：node build.mjs   （可选 DSH_PLUGIN_ID 覆盖注册 id，默认 dsh-usage-chart）
  */
@@ -19,9 +19,10 @@ const tscBin = require.resolve('typescript/bin/tsc')
 
 const PLUGIN_ID = process.env.DSH_PLUGIN_ID ?? 'dsh-usage-chart'
 
-// 与 @deepseek-ai/dsh-client-web/src/platform.ts 的 PLATFORM_MODULES 完全一致
-// + RUNTIME_STORE_EXEMPTION（packages/client/tsdown.client.ts 的 CLIENT_EXTERNALS）。
-// 运行时这些 specifier 由浏览器的模块表（loader）回答，绝不内联。
+// DSH Web 浏览器共享模块表（0.1.x PLATFORM_MODULES 与 0.2.x 静态共享表的并集）。
+// 运行时这些 specifier 由浏览器模块表（loader）回答，绝不内联；本插件产物实际
+// 只 require react / react/jsx-runtime（见 lib/client.js），列表是共享模块契约。
+// 0.2.0 起 @deepseek-ai/dsh-client-runtime 已退役（最后版本 0.1.1-rc.2），不再列为外部。
 const CLIENT_EXTERNALS = [
   'react',
   'react/jsx-runtime',
@@ -29,11 +30,12 @@ const CLIENT_EXTERNALS = [
   'react-dom/client',
   '@deepseek-ai/cordis',
   '@deepseek-ai/dsh-client-ui-slots',
-  '@deepseek-ai/dsh-client-web-react',
   '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-client-ui-dockkit',
+  '@deepseek-ai/dsh-client-store',
+  '@deepseek-ai/dsh-client-web-react',
   '@deepseek-ai/dsh-client-ui-attachment',
   '@deepseek-ai/dsh-client-schema-form',
-  '@deepseek-ai/dsh-client-runtime/client',
 ]
 
 // A clean output directory prevents stale chunks or declarations from leaking

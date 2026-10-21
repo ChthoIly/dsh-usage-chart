@@ -3,9 +3,15 @@
  *
  * 小接口：`foldRounds(events, resolvePricing?) → { totals, rounds }`。
  * 大实现：四桶 token 折叠（与 token-meter 语义一致）+ 轮次耗时
- * （turn/start → turn/end）+ TTFT（turn/start → 首个 usage 样本）+
+ * （turn/start → turn/end）+ TTFT（turn/start → 首个输出样本）+
  * 输出吞吐（outputTokens / 输出时长）+ 模型归因（request/context 优先、
  * request/header 回退、跨轮携带回退）+ 结束原因 + 每轮成本分拆。
+ *
+ * 跨版本事件词汇：0.1.x 的流式用量走 `assistant/chunk`，0.2.x 移除了该事件，
+ * 用量与流内时间线合并进 `assistant/message`（`usage` + `stream`）。这里优先用
+ * `stream` 的首/末时间戳计算 TTFT 与 TPS（0.2.x），流时间线缺席时回退到首个
+ * usage 样本 / turn 结束时刻（0.1.x 及旧日志）。`user/message.source` 在 0.1.x
+ * 是字符串，0.2.x 是 `{ kind }` 对象，两者都归一为归因字符串。
  *
  * 纯函数：不读文件、不发起请求；价格来源经 `resolvePricing` 注入
  * （接缝），默认用内置刊例价。测试喂合成事件流即可断言全部字段。
@@ -28,10 +34,13 @@ export interface SessionEventLike {
     provider?: string
     model?: string
     contextWindow?: number
-    source?: string
+    /** 0.1.x 是来源字符串；0.2.x 是携带 `kind` 的对象。 */
+    source?: string | { kind?: string }
     header?: { config?: { provider?: string; model?: string }; source?: string }
     chunk?: { type?: string; usage?: unknown }
     usage?: unknown
+    /** 0.2.x `assistant/message` 内嵌的流式时间线（绝对时间 + dt 增量编码）。 */
+    stream?: unknown
   }
 }
 
@@ -69,7 +78,7 @@ export interface UsageRound {
   outputTps: number | null
   /** turn/end.reason.kind；未结束为 null。 */
   endReason: string | null
-  /** 用户输入来源归因（'human' | 'agent.inject' | 'goal.continuation' 等，缺省为 null）。 */
+  /** 用户输入来源归因（'human' | 'agent.inject' | 'agent-message' 等；缺省为 null）。 */
   userSource: string | null
   cost: RoundCost
 }
@@ -118,11 +127,65 @@ interface TurnState {
   end: number | null
   endReason: string | null
   model: string | null
-  /** 首个 usage 样本的时间（TTFT 右端点）。 */
+  /** 首个 usage 样本的时间（0.1.x TTFT 右端点）。 */
   firstUsageAt: number | null
+  /** `assistant/message.stream` 时间线的最早输出时间（0.2.x TTFT 右端点，优先）。 */
+  firstOutputAt: number | null
+  /** `assistant/message.stream` 时间线的最晚输出时间（0.2.x TPS 右端点，优先）。 */
+  outputEndAt: number | null
   buckets: TokenUsageBuckets
   userSource: string | null
 }
+
+/**
+ * 从 0.2.x `assistant/message.stream` 提取首/末输出时间。
+ * 时间线条目有两种形态：带绝对 `time` 的 chunk/block 边界，以及带 `time0` 与
+ * `dt`（逐 chunk 毫秒增量数组）的增量编码；两者都参与取最早/最晚时间。
+ * @param stream - 未知形状的流时间线（只在数组时解析）。
+ * @returns 最早与最晚输出时间；无可用时间戳时为 null。
+ */
+function streamWindow(stream: unknown): { firstAt: number | null; lastAt: number | null } {
+  if (!Array.isArray(stream)) return { firstAt: null, lastAt: null }
+  let firstAt: number | null = null
+  let lastAt: number | null = null
+  const observe = (time: number): void => {
+    if (!Number.isFinite(time)) return
+    if (firstAt === null || time < firstAt) firstAt = time
+    if (lastAt === null || time > lastAt) lastAt = time
+  }
+  for (const item of stream) {
+    if (typeof item !== 'object' || item === null) continue
+    const record = item as { time?: unknown; time0?: unknown; dt?: unknown }
+    if (typeof record.time === 'number') observe(record.time)
+    if (typeof record.time0 === 'number') {
+      observe(record.time0)
+      if (Array.isArray(record.dt)) {
+        let span = 0
+        let valid = true
+        for (const delta of record.dt) {
+          if (typeof delta !== 'number' || !Number.isFinite(delta)) { valid = false; break }
+          span += delta
+        }
+        if (valid && span >= 0) observe(record.time0 + span)
+      }
+    }
+  }
+  return { firstAt, lastAt }
+}
+
+/**
+ * 归一用户输入来源：0.1.x 字符串原样保留；0.2.x 对象取 `kind`；
+ * 都缺席时按历史行为回退 'human'。
+ */
+function userSourceOf(data: SessionEventLike['data']): string | null {
+  if (typeof data.source === 'string' && data.source !== '') return data.source
+  if (typeof data.source === 'object' && data.source !== null) {
+    const kind = data.source.kind
+    if (typeof kind === 'string' && kind !== '') return kind
+  }
+  return typeof data.header?.source === 'string' && data.header.source !== '' ? data.header.source : 'human'
+}
+
 function turnReasonOf(reason: unknown): string | null {
   if (typeof reason === 'string' && reason !== '') return reason
   if (typeof reason === 'object' && reason !== null) {
@@ -159,10 +222,15 @@ export function foldRounds(events: readonly SessionEventLike[], resolvePricing?:
   let currentTurn = -1
   let stepBuckets: TokenUsageBuckets | null = null
 
+  const stateFor = (turn: number): TurnState => {
+    const existing = states.get(turn)
+    if (existing !== undefined) return existing
+    const created: TurnState = { start: null, end: null, endReason: null, model: null, firstUsageAt: null, firstOutputAt: null, outputEndAt: null, buckets: zeroBuckets(), userSource: null }
+    states.set(turn, created)
+    return created
+  }
   const commitStep = (turn: number, buckets: TokenUsageBuckets): void => {
-    const state = states.get(turn) ?? { start: null, end: null, endReason: null, model: null, firstUsageAt: null, buckets: zeroBuckets(), userSource: null }
-    addInto(state.buckets, buckets)
-    states.set(turn, state)
+    addInto(stateFor(turn).buckets, buckets)
     addInto(totals, buckets)
   }
   const recordUsageAt = (turn: number, time: number): void => {
@@ -188,9 +256,8 @@ export function foldRounds(events: readonly SessionEventLike[], resolvePricing?:
       case 'turn/start': {
         const turn = data.turn ?? -1
         openTurn = turn
-        const state = states.get(turn) ?? { start: null, end: null, endReason: null, model: null, firstUsageAt: null, buckets: zeroBuckets(), userSource: null }
+        const state = stateFor(turn)
         if (state.start === null) state.start = time
-        states.set(turn, state)
         break
       }
       case 'turn/end': {
@@ -220,16 +287,21 @@ export function foldRounds(events: readonly SessionEventLike[], resolvePricing?:
       case 'user/message': {
         const targetTurn = openStepTurn ?? openTurn ?? data.turn
         if (targetTurn !== undefined && targetTurn !== null) {
-          const state = states.get(targetTurn) ?? { start: null, end: null, endReason: null, model: null, firstUsageAt: null, buckets: zeroBuckets(), userSource: null }
-          if (state.userSource === null) {
-            const src = typeof data.source === 'string' ? data.source : typeof data.header?.source === 'string' ? data.header.source : 'human'
-            state.userSource = src
-          }
-          states.set(targetTurn, state)
+          const state = stateFor(targetTurn)
+          if (state.userSource === null) state.userSource = userSourceOf(data)
         }
         break
       }
       default: {
+        // 0.2.x：流式时间线内嵌在 assistant/message.stream 中，先记录首/末输出时间。
+        if (type === 'assistant/message' && data.turn !== undefined) {
+          const window = streamWindow(data.stream)
+          if (window.firstAt !== null || window.lastAt !== null) {
+            const state = stateFor(data.turn)
+            if (window.firstAt !== null && (state.firstOutputAt === null || window.firstAt < state.firstOutputAt)) state.firstOutputAt = window.firstAt
+            if (window.lastAt !== null && (state.outputEndAt === null || window.lastAt > state.outputEndAt)) state.outputEndAt = window.lastAt
+          }
+        }
         let usage: unknown
         let turn: number | undefined
         let step: number | undefined
@@ -268,10 +340,13 @@ export function foldRounds(events: readonly SessionEventLike[], resolvePricing?:
     if (!anyTokens(state.buckets)) continue
     const model = state.model ?? carryModel
     const durationMs = state.start !== null && state.end !== null ? state.end - state.start : null
-    const ttftMs = state.start !== null && state.firstUsageAt !== null ? state.firstUsageAt - state.start : null
+    // 0.2.x 优先用流时间线首/末时间；旧日志回退到首个 usage 样本 / turn 结束时刻。
+    const outputStart = state.firstOutputAt ?? state.firstUsageAt
+    const outputEnd = state.outputEndAt ?? state.end
+    const ttftMs = state.start !== null && outputStart !== null ? outputStart - state.start : null
     const outputTps =
-      state.buckets.outputTokens > 0 && state.end !== null && state.firstUsageAt !== null && state.end > state.firstUsageAt
-        ? state.buckets.outputTokens / ((state.end - state.firstUsageAt) / 1_000)
+      state.buckets.outputTokens > 0 && outputStart !== null && outputEnd !== null && outputEnd > outputStart
+        ? state.buckets.outputTokens / ((outputEnd - outputStart) / 1_000)
         : null
     const resolved = resolver.resolve(model)
     // 按轮次开始时刻推断高峰/空闲时段计费；时刻缺失（无 turn/start）时按高峰保守估算。

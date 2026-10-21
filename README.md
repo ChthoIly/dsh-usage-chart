@@ -32,6 +32,7 @@ Click ▸ to open the dashboard panel:
 - **Cost estimation** — Estimated from official list prices (CNY/USD dual-currency per 1M tokens, peak/off-peak tiers) with verified source date; supports user override via `pricing.json`; unpriced models are explicitly tagged.
 - **Session-cost aggregation (v1.1.7)** — Adds the host's per-round costs using each round's model and billing tier. While a new round is in progress, the indicator and panel share the fetched history plus a marked estimate for new tokens, then refresh the history after token updates pause. The model label follows the same current-history/live-node priority in both places.
 - **DSH 0.1.2+ and themed docks (v1.1.7)** — Reads conversation nodes from the independent `chat` source on newer DSH versions, with a legacy session-snapshot fallback; keeps the expanded panel anchored when a theme creates a fixed-position containing block.
+- **DSH 0.2.x client-SDK compatibility (v1.1.8)** — Declares client peer ranges spanning both DSH 0.1.x and 0.2.x (tested against 0.2.1-rc.2) so DSH 0.2.x's plugin admission gate accepts the plugin at startup; the retired `@deepseek-ai/dsh-client-runtime` peer is gone, and the assistant-node model identity now also reads the 0.2.x `providerMetadata` field (0.1.x `provenance` still preferred when present, `requestConfig` kept as the last fallback).
 - **Peak / off-peak tiered billing (v1.0.1)** — Peak hours (Beijing time Monday–Friday 09:00–12:00 and 14:00–18:00, UTC 01:00–04:00 and 06:00–10:00) billed at 2× the off-peak rate; all other hours and weekends billed at off-peak rates; rounds bill automatically based on start time (or conservative peak if unknown); live red/green tag in the panel header.
 - **Official dual-currency list pricing (v1.0.1)** — Builtin official CNY and USD prices directly used according to the active display currency — **no FX conversion applied to costs** (matching official billing); "Refresh rate" updates only the informational "1 USD ≈ X CNY" reference note.
 - **Multi-currency display (v0.3 / v1.0.1)** — One-click toggle between USD and CNY (persisted in localStorage); indicator, panel, chart, and badges all follow.
@@ -48,10 +49,10 @@ Click ▸ to open the dashboard panel:
 | Token usage | DSH official adapter session projections (`tokenUsage` / `contextPressure`) | ✅ Official real-time data |
 | Cost | Official list price (builtin + optional `pricing.json` override, CNY/USD dual-currency / 1M tokens, peak/off-peak tiers) × reported usage | ⚠️ Estimate, not invoice; resolved via Host `/pricing` snapshot |
 | Display currency | Host `/meta` config; costs directly calculated in selected currency list price | ✅ Official dual-currency list price |
-| Per-round history | Host session log fold (`/usage`): duration / TTFT / TPS / model attribution / **input source attribution** / end reason / per-round cost | ✅ Official event stream fold |
+| Per-round history | Host session log fold (`/usage`): duration / TTFT / TPS / model attribution / **input source attribution** / end reason / per-round cost. DSH 0.2.x derives TTFT/TPS from `assistant/message.stream`; 0.1.x falls back to chunk/usage anchors | ✅ Official event stream fold |
 | Context & compaction | Official `contextBreakdown` / `contextPressure` projections + Host `compaction/*` event fold | ✅ Official projections + event fold |
 | Balance | Official `GET https://api.deepseek.com/user/balance` | ✅ Official real-time data |
-| Model name | Adapter request provenance / `request/context` | ✅ Official real-time data |
+| Model name | Adapter `providerMetadata` (DSH 0.2.x) / request provenance / `request/context` (DSH 0.1.x) | ✅ Official real-time data |
 
 ## Tech stack
 
@@ -74,11 +75,11 @@ dsh plugin --profile web add dsh-usage-chart   # installs and registers the prof
 dsh web --profile web                          # starts DSH Web (stop it first if already running)
 ```
 
-To update after 1.1.7 is published: pnpm may print `Already up to date` when already installed — use an **explicit version** (recommended) or **remove then re-add**:
+To update after 1.1.8 is published: pnpm may print `Already up to date` when already installed — use an **explicit version** (recommended) or **remove then re-add**:
 
 ```sh
 # Option ①: pin the target version explicitly
-dsh plugin --profile web add dsh-usage-chart@1.1.7
+dsh plugin --profile web add dsh-usage-chart@1.1.8
 # Option ②: remove, then re-add (back to latest)
 dsh plugin --profile web remove dsh-usage-chart
 dsh plugin --profile web add dsh-usage-chart
@@ -191,6 +192,9 @@ A: `npx @deepseek-ai/dsh` runs transiently and installs no global command. Run `
 **Q: Install shows `WARN missing peer react@^18.2.0`?**
 A: Harmless — react is provided by the DSH Web platform in the browser; the profile does not need it. Plugin ≥ 0.1.1 marks react as an optional peer.
 
+**Q: DSH 0.2.x warns `dsh-usage-chart@1.1.7 与 DSH 0.2.1-rc.2 不兼容（要求 @deepseek-ai/dsh-client-locale >=0.1.0-rc.6 <0.2.0, ...）…` — is the plugin incompatible?**
+A: That warning comes from DSH 0.2.x's **plugin admission gate**, not from a damaged DSH install and not from data loss: DSH refuses to load a plugin whose `@deepseek-ai/dsh*` peer ranges do not match the running runtime version, and plugin 1.1.x declared 0.1.x-only ranges. Upgrade the plugin to **≥ 1.1.8** (`dsh plugin --profile web add dsh-usage-chart@1.1.8`), then restart `dsh web` and reload the DSH Web page if it was already open. DSH itself was not damaged and no session data, costs, or credentials were lost — the plugin simply was not loaded.
+
 **Q: The balance still shows `–` / "not configured" after setting the API key in the web UI?**
 A: Make sure the plugin is ≥ 0.1.1, then restart `dsh web`. As a stopgap, set `DEEPSEEK_API_KEY` or `config.apiKey`.
 
@@ -280,7 +284,7 @@ dsh-usage-chart/
 
 | Component | Supported |
 |---|---|
-| DSH | ≥ 0.1.0-rc.6, built against the 0.1.x API; adapts to the `dsh-session` `snapshotEvents()` API — `Session.events` was removed in `0.1.2-rc.1`, so the `/usage` route reads events via `snapshotEvents()` with a legacy `events` fallback |
+| DSH | ≥ 0.1.0-rc.6, including 0.2.x (tested against 0.2.1-rc.2); peer ranges cover both the 0.1.x and 0.2.x client SDKs (v1.1.8), and the `/usage` route reads events via the `dsh-session` `snapshotEvents()` API with a legacy `events` fallback (`Session.events` was removed in `0.1.2-rc.1`) |
 | Node.js | ≥ 20 |
 | Web UI | React 18 / `conversation.composer.dock` + `conversation.chat.assistant-actions` |
 | OS | macOS, Linux, Windows (pure JavaScript, no native dependencies) |

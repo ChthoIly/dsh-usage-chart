@@ -6,13 +6,13 @@
  * （host /usage 折叠）——两条路径保持独立（决策 2）。
  *
  * v1.0.1：观测路径也给出每轮成本——用 /pricing 快照 + 逐轮模型/开始时刻
- * （快照 provenance/requestConfig 与节点 time 推导）按高峰/空闲时段估算
+ * （快照 provenance / providerMetadata / requestConfig 与节点 time 推导）按高峰/空闲时段估算
  * 双币种成本，使成本视角在没有宿主历史时也能逐轮显示费用。
  */
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import type { CostCurrency, TokenUsageBuckets } from '../../pricing/calc.ts'
 import { costSplitAt, ZERO_BUCKETS } from '../../pricing/calc.ts'
-import type { ConversationNode } from '../snapshot.ts'
+import { nodeModelName, type ConversationNode } from '../snapshot.ts'
 import { resolvePricing, type PricingTable } from '../pricing-api.ts'
 import type { ChartCost, ChartRound } from './types.ts'
 
@@ -25,7 +25,7 @@ interface ObservedState {
   open: TokenUsageBuckets
 }
 
-/** 逐轮推导 { 模型, 开始时刻 }：模型取该轮最后一个 assistant 节点的 provenance/requestConfig；时刻取该轮最早节点时间。 */
+/** 逐轮推导 { 模型, 开始时刻 }：模型取该轮 assistant 节点的模型身份（provenance / providerMetadata / requestConfig）；时刻取该轮最早节点时间。 */
 function turnMeta(nodes: readonly ConversationNode[]): Map<number, { model: string | null; startedAt: number | null }> {
   const map = new Map<number, { model: string | null; startedAt: number | null }>()
   for (const node of nodes) {
@@ -40,8 +40,8 @@ function turnMeta(nodes: readonly ConversationNode[]): Map<number, { model: stri
       meta.startedAt = node.time
     }
     if (meta.model === null && node.kind === 'assistant') {
-      if (node.provenance?.model !== undefined && node.provenance.model !== '') meta.model = node.provenance.model
-      else if (node.requestConfig?.model !== undefined && node.requestConfig.model !== '') meta.model = node.requestConfig.model
+      const model = nodeModelName(node)
+      if (model !== undefined) meta.model = model
     }
   }
   return map

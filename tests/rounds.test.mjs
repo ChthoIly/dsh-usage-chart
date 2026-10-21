@@ -88,6 +88,35 @@ test('foldRounds computes per-round timing, TTFT, TPS, model attribution and cos
   assert.equal(r2.ttftMs, 2_000)
 })
 
+test('foldRounds uses assistant/message.stream timing on DSH 0.2.x logs (no assistant/chunk)', () => {
+  const s = stream()
+  // 0.2.x 会话日志：没有 assistant/chunk，助手消息自带 usage + 流式时间线。
+  s.push('turn/start', 1_000, { turn: 1 })
+  s.push('step/start', 1_005, { turn: 1, step: 0 })
+  s.push('user/message', 1_010, { turn: 1, source: { kind: 'agent-message' } })
+  s.push('request/context', 1_020, { provider: 'deepseek', model: 'deepseek-flash' })
+  s.push('assistant/message', 9_000, {
+    turn: 1,
+    step: 0,
+    usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10 },
+    stream: [
+      { type: 'chunk', time: 1_500, chunk: { type: 'block-start', index: 0, blockType: 'reasoning' } },
+      { type: 'reasoning-chunks', time0: 1_600, dt: [10, 10, 10], texts: ['a', 'b', 'c'] },
+      { type: 'chunk', time: 5_000, chunk: { type: 'block-end', index: 0 } },
+    ],
+  })
+  s.push('turn/end', 9_500, { turn: 1, reason: { kind: 'completed' } })
+
+  const { totals, rounds } = foldRounds(s.events, flashResolver())
+  assert.deepEqual(totals, { uncachedInputTokens: 100, outputTokens: 50, cacheReadTokens: 10, cacheWriteTokens: 0 })
+  assert.equal(rounds.length, 1)
+  // TTFT/TPS 取流时间线：首个输出 1500（而非 message 事件 9000），末个输出 5000。
+  assert.equal(rounds[0].ttftMs, 500)
+  assert.equal(rounds[0].outputTps, 50 / ((5_000 - 1_500) / 1_000))
+  assert.equal(rounds[0].durationMs, 8_500)
+  assert.equal(rounds[0].userSource, 'agent-message')
+})
+
 test('foldRounds bills peak vs off-peak rounds by their start time', () => {
   const s = stream()
   // 高峰轮：开始于北京时间 10:00（UTC 02:00）

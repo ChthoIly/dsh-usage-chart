@@ -32,6 +32,7 @@
 - **成本估算** — 按官方刊例价（CNY/USD 双币种 /1M tokens，高峰/空闲双时段）估算并标注来源与核验日期；支持用户覆盖 `pricing.json`；未定价模型显式标记「未定价模型」
 - **会话成本按轮汇总（v1.1.7）** — 按每轮实际模型和计费时段累加宿主成本；新轮进行中，指示器和面板共用“已读取历史＋新增 token 的估算”，实时用量暂停更新后刷新宿主历史。两处模型名称采用相同的历史/实时来源顺序。
 - **DSH 0.1.2+ 与皮肤兼容（v1.1.7）** — 新版从独立 `chat` 源读取会话节点，旧版回退到会话快照；皮肤创建 fixed 定位包含块时，展开面板仍贴近指示器。
+- **兼容 DSH 0.2.x client SDK（v1.1.8）** — client peer 范围同时覆盖 DSH 0.1.x 与 0.2.x（已在 0.2.1-rc.2 上验证），DSH 0.2.x 的插件准入校验在启动时即可通过；已移除退役的 `@deepseek-ai/dsh-client-runtime` peer，助手节点模型标识新增读取 0.2.x 的 `providerMetadata` 字段（存在 0.1.x 的 `provenance` 时仍优先，`requestConfig` 保留为最后回退）。
 - **高峰/空闲时段计费（v1.0.1）** — 官方高峰时段（北京时间周一至周五 09:00–12:00、14:00–18:00，即 UTC 01:00–04:00、06:00–10:00）价格为空闲时段的 2 倍；其余时段及周末全天为空闲时段；每轮成本按轮次开始时刻自动选用对应时段单价（时刻缺失按高峰保守估算）；面板顶部以**红/绿 tag 实时标注当前计费时段**（红=高峰、绿=空闲），每轮解释卡也显示该轮计费时段
 - **双币种官方刊例价（v1.0.1）** — 中文定价页（CNY）与英文定价页（USD）的官方报价同时内置：CNY 显示用人民币报价、USD 显示用美元报价，**不做汇率换算**（与官方账单口径一致）；「刷新汇率」仅更新「1 USD ≈ X CNY」参考注记
 - **多币种成本（v0.3 / v1.0.1）** — 成本区 CNY/USD 一键切换（选择在浏览器记住），指示器、面板、图表与成本徽章全部跟随所选币种
@@ -48,10 +49,10 @@
 | token 用量 | DSH 官方 adapter 上报的会话投影（`tokenUsage` / `contextPressure`） | ✅ 官方真实数据，实时更新 |
 | 成本 | 官方刊例价（内置表 + 可选用户覆盖 `pricing.json`，CNY/USD 双币种 /1M tokens，高峰/空闲双时段）× adapter 上报用量 | ⚠️ 估算值，非官方账单；价格经宿主 `/pricing` 单点解析 |
 | 成本币种 | 宿主 `/meta` 下发配置；成本按所选币种的官方刊例价直接计算（不做汇率换算） | ✅ 官方双币种刊例价 |
-| 轮次明细 | 宿主会话日志折叠（`/usage`）：耗时 / TTFT / TPS / 模型归因 / **输入来源归因** / 结束原因 / 每轮成本 | ✅ 官方事件流折叠 |
+| 轮次明细 | 宿主会话日志折叠（`/usage`）：耗时 / TTFT / TPS / 模型归因 / **输入来源归因** / 结束原因 / 每轮成本。DSH 0.2.x 用 `assistant/message.stream` 推导 TTFT/TPS，0.1.x 回退到 chunk/usage 锚点 | ✅ 官方事件流折叠 |
 | 上下文与压缩诊断 | 官方 `contextBreakdown` / `contextPressure` 投影 + 宿主 `compaction/*` 事件折叠 | ✅ 官方投影 + 事件流折叠 |
 | 余额 | 官方 `GET https://api.deepseek.com/user/balance` | ✅ 官方实时数据 |
-| 模型名 | adapter 上报的请求 provenance / `request/context` | ✅ 官方真实数据 |
+| 模型名 | adapter 上报的 `providerMetadata`（DSH 0.2.x）/ 请求 provenance / `request/context`（DSH 0.1.x） | ✅ 官方真实数据 |
 
 ## 技术栈
 
@@ -75,12 +76,12 @@ dsh plugin --profile web add dsh-usage-chart   # 安装并自动登记为 profil
 dsh web --profile web                          # 启动 DSH Web（已在运行时先停止再启动）
 ```
 
-1.1.7 发布后更新：pnpm 对已安装的依赖重新 `add` 可能显示 `Already up to date`
+1.1.8 发布后更新：pnpm 对已安装的依赖重新 `add` 可能显示 `Already up to date`
 而不升级，请用**显式版本**（推荐）或**先卸载再安装**：
 
 ```sh
 # 方式①：显式指定目标版本
-dsh plugin --profile web add dsh-usage-chart@1.1.7
+dsh plugin --profile web add dsh-usage-chart@1.1.8
 # 方式②：先移除再重装（回到最新版）
 dsh plugin --profile web remove dsh-usage-chart
 dsh plugin --profile web add dsh-usage-chart
@@ -93,7 +94,7 @@ dsh plugin --profile web add dsh-usage-chart
 
 > ⚠️ **未全局安装 dsh（报 `dsh: command not found` / PowerShell `无法将“dsh”项识别为…`）？
 > 把上面每条 `dsh` 都写成 `npx --yes @deepseek-ai/dsh`**，例如
-> `npx --yes @deepseek-ai/dsh plugin --profile web add dsh-usage-chart@1.1.7`
+> `npx --yes @deepseek-ai/dsh plugin --profile web add dsh-usage-chart@1.1.8`
 > （原因与解法见 [FAQ](#常见问题faq) 第一条）。
 
 ### 方式二：从 GitHub 安装（源码构建）
@@ -235,6 +236,9 @@ A：`npx @deepseek-ai/dsh` 是临时运行、不产生全局命令。请 `npm in
 A：正常且无害——react 由 DSH Web 平台在浏览器端内置，profile 无需安装。插件 ≥ 0.1.1
 已把 react 标记为可选 peer，不再报警；0.1.0 的该警告可忽略。
 
+**Q：DSH 0.2.x 提示 `dsh-usage-chart@1.1.7 与 DSH 0.2.1-rc.2 不兼容（要求 @deepseek-ai/dsh-client-locale >=0.1.0-rc.6 <0.2.0, ...）…`，是插件不兼容吗？**
+A：该警告来自 DSH 0.2.x 的**插件准入校验**，不是 DSH 装坏了，也不会丢数据：当插件的 `@deepseek-ai/dsh*` peer 范围不匹配当前运行时版本时 DSH 会拒绝加载，而插件 1.1.x 声明的是仅 0.1.x 的范围。把插件升级到 **≥ 1.1.8**（`dsh plugin --profile web add dsh-usage-chart@1.1.8`）后重启 `dsh web`；若 DSH Web 页面已打开，再刷新页面即可。DSH 本身未受损，会话数据、成本记录与凭据均未丢失——插件只是没有被加载。
+
 **Q：网页端配了 API Key，余额仍显示 `–` 或「未配置」？**
 A：请确认插件版本 ≥ 0.1.1（0.1.1 起余额查询才走 DSH 凭据服务读取网页端密钥）；
 升级后重启 `dsh web`。临时方案：先设环境变量 `DEEPSEEK_API_KEY` 或 `config.apiKey`。
@@ -333,7 +337,7 @@ dsh-usage-chart/
 
 | 组件 | 支持范围 |
 |---|---|
-| DSH | ≥ 0.1.0-rc.6，当前按 0.1.x API 构建；已适配 `dsh-session` 的 `snapshotEvents()` API——`Session.events` 自 `0.1.2-rc.1` 起移除，`/usage` 路由通过 `snapshotEvents()` 读取事件，并保留旧版 `events` 属性回退 |
+| DSH | ≥ 0.1.0-rc.6，含 0.2.x（已在 0.2.1-rc.2 上验证）；peer 范围同时覆盖 0.1.x 与 0.2.x 两代 client SDK（v1.1.8），`/usage` 路由通过 `dsh-session` 的 `snapshotEvents()` API 读取事件，并保留旧版 `events` 属性回退（`Session.events` 自 `0.1.2-rc.1` 起移除） |
 | Node.js | ≥ 20 |
 | Web UI | React 18 / `conversation.composer.dock` + `conversation.chat.assistant-actions` |
 | 系统 | macOS、Linux、Windows（纯 JavaScript，无原生依赖） |
