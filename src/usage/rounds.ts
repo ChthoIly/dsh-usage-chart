@@ -137,37 +137,45 @@ interface TurnState {
   userSource: string | null
 }
 
+/** 片段是否携带 token：空字符串（打包流常以空片段开头）与缺失值都不算。 */
+function isTokenFragment(fragment: unknown): boolean {
+  if (typeof fragment === 'string') return fragment !== ''
+  return fragment !== null && fragment !== undefined
+}
+
 /**
- * 从 0.2.x `assistant/message.stream` 提取首/末输出时间。
- * 时间线条目有两种形态：带绝对 `time` 的 chunk/block 边界，以及带 `time0` 与
- * `dt`（逐 chunk 毫秒增量数组）的增量编码；两者都参与取最早/最晚时间。
+ * 从 0.2.x `assistant/message.stream` 提取首/末 **token** 时间。
+ *
+ * 时间线有两类条目：
+ *  - `{ type: 'chunk', time, chunk }`：block-start / block-end / usage / finish 等
+ *    结构边界，不携带 token，不参与取值（否则 TTFT 会落在首个 token 之前）；
+ *  - 打包增量 `{ type: '*-chunks', time0, dt, texts | args }`：第 i 个片段的时间是
+ *    `time0 + dt[0] + … + dt[i-1]`；只有非空片段才算 token。
  * @param stream - 未知形状的流时间线（只在数组时解析）。
- * @returns 最早与最晚输出时间；无可用时间戳时为 null。
+ * @returns 首个与最后一个 token 片段的时间；没有 token 片段时为 null。
  */
 function streamWindow(stream: unknown): { firstAt: number | null; lastAt: number | null } {
   if (!Array.isArray(stream)) return { firstAt: null, lastAt: null }
   let firstAt: number | null = null
   let lastAt: number | null = null
-  const observe = (time: number): void => {
-    if (!Number.isFinite(time)) return
-    if (firstAt === null || time < firstAt) firstAt = time
-    if (lastAt === null || time > lastAt) lastAt = time
-  }
   for (const item of stream) {
     if (typeof item !== 'object' || item === null) continue
-    const record = item as { time?: unknown; time0?: unknown; dt?: unknown }
-    if (typeof record.time === 'number') observe(record.time)
-    if (typeof record.time0 === 'number') {
-      observe(record.time0)
-      if (Array.isArray(record.dt)) {
-        let span = 0
-        let valid = true
-        for (const delta of record.dt) {
-          if (typeof delta !== 'number' || !Number.isFinite(delta)) { valid = false; break }
-          span += delta
-        }
-        if (valid && span >= 0) observe(record.time0 + span)
+    const record = item as { time0?: unknown; dt?: unknown; texts?: unknown; args?: unknown }
+    if (typeof record.time0 !== 'number' || !Number.isFinite(record.time0)) continue
+    const fragments = Array.isArray(record.texts) ? record.texts : Array.isArray(record.args) ? record.args : null
+    if (fragments === null) continue
+    const deltas = Array.isArray(record.dt) ? record.dt : []
+    let time = record.time0
+    for (let index = 0; index < fragments.length; index++) {
+      if (index > 0) {
+        const delta = deltas[index - 1]
+        // 增量缺失或非法时无法定位后续片段，停在已知时间为止。
+        if (typeof delta !== 'number' || !Number.isFinite(delta) || delta < 0) break
+        time += delta
       }
+      if (!isTokenFragment(fragments[index])) continue
+      if (firstAt === null || time < firstAt) firstAt = time
+      if (lastAt === null || time > lastAt) lastAt = time
     }
   }
   return { firstAt, lastAt }

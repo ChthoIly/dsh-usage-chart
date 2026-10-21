@@ -13,11 +13,11 @@
   - 继续支持 DSH 0.1.x——插件实际使用的接口没有变化。已对照本机安装的 DSH 0.2.1-rc.2 应用包与已发布的 0.2.1-rc.2 包类型声明核实：`conversation.composer.dock`、`conversation.chat.assistant-actions` 槽位仍存在且正常渲染；会话作用域标准属性仍提供 `useSession` / `sessionId` / `useProjection`（ui-session）与 `useChat`（ui-chat）；`useChat` 快照仍暴露 `legacy.nodes`；`tokenUsage` / `contextPressure` / `contextBreakdown` 投影字段不变；`ctx.locale.getLocale()` / `subscribe` 与 `ctx.slots.inject` / `register` 未变；宿主 `webServer.register` / `sessions.get` / `snapshotEvents` / `credentials.resolve` 服务未变。
 - **适配 DSH 0.2.x 的助手节点模型识别**——助手节点的模型标识新增读取 0.2.x 的 `providerMetadata` 字段；存在 DSH 0.1.x 的 `provenance` 字段时仍优先使用，`requestConfig` 继续作为最后回退，0.2.x 下模型名称与逐条消息成本归因不再丢失。
 - **client 类型声明自包含**——生成的 client `.d.ts` 不再 import 已退役的 `@deepseek-ai/dsh-client-runtime` 包。在仅安装 0.2.x 的 DSH 环境做类型检查时，不会再因悬空导入（DSH 已不再提供该包）而失败；0.1.x 环境行为保持不变。
-- **适配 DSH 0.2.x 会话日志词汇**——DSH 0.2.x 移除了 `assistant/chunk` 事件，流式用量合并进 `assistant/message`（`usage` + `stream`）。宿主折叠本就能从 `assistant/message.usage` 正确累计 token；现在进一步用 `assistant/message.stream` 的首/末时间戳推导 TTFT / 输出吞吐（流时间线缺席时回退到 0.1.x 的 chunk/usage 锚点）。`user/message.source` 由字符串改为 `{ kind }` 对象，现已归一化，人工/Agent/续跑来源归因不再一律回退为 `human`。
+- **适配 DSH 0.2.x 会话日志词汇**——DSH 0.2.x 移除了 `assistant/chunk` 事件，流式用量合并进 `assistant/message`（`usage` + `stream`）。宿主折叠本就能从 `assistant/message.usage` 正确累计 token；现在进一步用 `assistant/message.stream` 中首个/最后一个携带 token 的片段推导 TTFT / 输出吞吐（跳过 `block-start` / `usage` / `finish` 等结构记录与打包段开头的空片段）（流时间线缺席时回退到 0.1.x 的 chunk/usage 锚点）。`user/message.source` 由字符串改为 `{ kind }` 对象，现已归一化，人工/Agent/续跑来源归因不再一律回退为 `human`。
 
 ### 测试
 
-- 新增 manifest 测试断言放宽后的 peer 范围、退役的 `@deepseek-ai/dsh-client-runtime` peer/inject 条目已移除，以及构建后的 client bundle 与发布的 client 类型声明均不再引用该退役包。新增折叠测试喂入 DSH 0.2.x 形状的日志（无 `assistant/chunk`、`assistant/message` 带 `usage` + `stream`、`user/message.source` 为对象），断言 token 汇总、由流时间线推导的 TTFT/TPS 与来源归因。`npm run verify` 全部通过（typecheck + build + `node --test`，共 49 项测试）。兼容面已对照本机安装的 DSH 0.2.1-rc.2 应用包与已发布的 0.2.1-rc.2 包类型声明核实；并在 DSH 0.2.1-rc.2 Web 实例上用 headless 浏览器完成加载冒烟测试：boot 图中包含本插件，输入框下方指示器在真实会话上渲染出实时用量/成本（经 `locale` 服务显示中文），展开面板渲染出会话汇总、上下文构成与投影数据，且无插件控制台错误。
+- 新增 manifest 测试断言放宽后的 peer 范围、退役的 `@deepseek-ai/dsh-client-runtime` peer/inject 条目已移除，以及构建后的 client bundle 与发布的 client 类型声明均不再引用该退役包。新增折叠测试喂入 DSH 0.2.x 形状的日志（无 `assistant/chunk`、`assistant/message` 带 `usage` + `stream`、`user/message.source` 为对象），断言 token 汇总、由携带 token 的流片段推导的 TTFT/TPS 与来源归因；另有 client 测试覆盖 `provenance` → `providerMetadata` → `requestConfig` 模型回退。`npm run verify` 全部通过（typecheck + build + `node --test`，共 50 项测试）。兼容面已对照本机安装的 DSH 0.2.1-rc.2 应用包与已发布的 0.2.1-rc.2 包类型声明核实；并在 DSH 0.2.1-rc.2 Web 实例上用 headless 浏览器完成加载冒烟测试：boot 图中包含本插件，输入框下方指示器在真实会话上渲染出实时用量/成本（经 `locale` 服务显示中文），展开面板渲染出会话汇总、上下文构成与投影数据，且无插件控制台错误。
 
 ## [1.1.7] - 2026-09-24
 

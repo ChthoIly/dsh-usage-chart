@@ -99,10 +99,14 @@ test('foldRounds uses assistant/message.stream timing on DSH 0.2.x logs (no assi
     turn: 1,
     step: 0,
     usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 10 },
+    // 真实 0.2.x 形状：texts 比 dt 多一项（第 i 片段时间 = time0 + Σdt[0..i-1]），
+    // 打包段常以空片段开头；block-start/usage/finish 等 chunk 边界不携带 token。
     stream: [
       { type: 'chunk', time: 1_500, chunk: { type: 'block-start', index: 0, blockType: 'reasoning' } },
-      { type: 'reasoning-chunks', time0: 1_600, dt: [10, 10, 10], texts: ['a', 'b', 'c'] },
-      { type: 'chunk', time: 5_000, chunk: { type: 'block-end', index: 0 } },
+      { type: 'reasoning-chunks', time0: 2_900, dt: [100, 50], texts: ['', 'Hi', ' there'] },
+      { type: 'tool-call-chunks', time0: 4_000, dt: [], id: 'call-1', index: 1, args: ['{"a":1}'] },
+      { type: 'chunk', time: 5_000, chunk: { type: 'block-end', index: 1 } },
+      { type: 'chunk', time: 5_010, chunk: { type: 'finish' } },
     ],
   })
   s.push('turn/end', 9_500, { turn: 1, reason: { kind: 'completed' } })
@@ -110,9 +114,10 @@ test('foldRounds uses assistant/message.stream timing on DSH 0.2.x logs (no assi
   const { totals, rounds } = foldRounds(s.events, flashResolver())
   assert.deepEqual(totals, { uncachedInputTokens: 100, outputTokens: 50, cacheReadTokens: 10, cacheWriteTokens: 0 })
   assert.equal(rounds.length, 1)
-  // TTFT/TPS 取流时间线：首个输出 1500（而非 message 事件 9000），末个输出 5000。
-  assert.equal(rounds[0].ttftMs, 500)
-  assert.equal(rounds[0].outputTps, 50 / ((5_000 - 1_500) / 1_000))
+  // TTFT 取首个非空 token 片段 3000（不是 block-start 1500，也不是空片段 2900）；
+  // TPS 窗口止于最后一个 token 片段 4000（不是 block-end / finish）。
+  assert.equal(rounds[0].ttftMs, 2_000)
+  assert.equal(rounds[0].outputTps, 50 / ((4_000 - 3_000) / 1_000))
   assert.equal(rounds[0].durationMs, 8_500)
   assert.equal(rounds[0].userSource, 'agent-message')
 })
