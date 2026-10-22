@@ -19,7 +19,7 @@ async function loadClientModule(path) {
   return import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].contents).toString('base64')}`)
 }
 
-const [{ useSessionNodes }, { sameUsage, usageDelta, lastRoundModel, sumRoundCosts }] = await Promise.all([
+const [{ useSessionNodes, nodeModelName }, { sameUsage, usageDelta, lastRoundModel, sumRoundCosts }] = await Promise.all([
   loadClientModule('../src/client/snapshot.ts'),
   loadClientModule('../src/client/rounds/summary.ts'),
 ])
@@ -34,6 +34,17 @@ test('chat nodes take priority in DSH 0.1.2+ while both hooks keep a stable call
   )
   assert.equal(nodes, chatNodes)
   assert.deepEqual(calls, ['chat', 'session'])
+})
+
+test('node model identity reads 0.1.x provenance, 0.2.x providerMetadata, then requestConfig', () => {
+  const base = { kind: 'assistant', seq: 1, turn: 1 }
+  // DSH 0.2.x 节点：provenance 已改名为 providerMetadata
+  assert.equal(nodeModelName({ ...base, providerMetadata: { provider: 'deepseek', model: 'deepseek-v4-pro' }, requestConfig: { model: 'deepseek-flash' } }), 'deepseek-v4-pro')
+  // DSH 0.1.x 节点：provenance 仍优先
+  assert.equal(nodeModelName({ ...base, provenance: { provider: 'deepseek', model: 'deepseek-flash' }, providerMetadata: { provider: 'x', model: 'other' } }), 'deepseek-flash')
+  // 只有请求配置时回退 requestConfig；空字符串不算模型
+  assert.equal(nodeModelName({ ...base, providerMetadata: { provider: 'deepseek', model: '' }, requestConfig: { model: 'deepseek-flash' } }), 'deepseek-flash')
+  assert.equal(nodeModelName(base), undefined)
 })
 
 test('session nodes remain available when the chat source is absent or empty', () => {

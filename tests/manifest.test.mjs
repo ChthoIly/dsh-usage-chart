@@ -1,15 +1,52 @@
 import assert from 'node:assert/strict'
-import { access, readFile } from 'node:fs/promises'
+import { access, readdir, readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+
+/**
+ * DSH 客户端包 peer：范围必须同时容纳 0.1.x（如 0.1.0-rc.6）与 0.2.x（如 0.2.1-rc.2）。
+ * DSH 门禁用 semver.satisfies(runtime, range, { includePrerelease: true }) 比较运行时版本，
+ * 因此上界写成 <0.3.0-0：既接受 0.2.x 预发布，又不会把未来 0.3.0-rc.x 提前放行。
+ * 不要用 engines.dsh 替代——声明 engines.dsh 会让 DSH 跳过 peerDependencies 范围检查。
+ */
+const CLIENT_PEERS = [
+  '@deepseek-ai/dsh-client-locale',
+  '@deepseek-ai/dsh-client-ui-conversation',
+  '@deepseek-ai/dsh-client-ui-slots',
+]
 
 test('package declares an installable DSH web bundle', () => {
   assert.equal(pkg.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(pkg.dsh.client.platform, 'web')
   assert.ok(pkg.keywords.includes('dsh-plugin'))
-  assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-client-locale'], '>=0.1.0-rc.6 <0.2.0')
-  assert.equal(pkg.peerDependenciesMeta['@deepseek-ai/dsh-client-locale'].optional, true)
+})
+
+test('client peer ranges admit DSH 0.1.x and 0.2.x runtimes', () => {
+  for (const name of CLIENT_PEERS) {
+    assert.equal(pkg.peerDependencies[name], '>=0.1.0-rc.6 <0.3.0-0')
+    assert.equal(pkg.peerDependenciesMeta[name]?.optional, true)
+  }
+  // DSH 0.2.0 起 @deepseek-ai/dsh-client-runtime 已退役（最后版本 0.1.1-rc.2）：
+  // 它不再有可被检查的运行时含义，客户端类型也不得再 import 它。
+  assert.equal(pkg.peerDependencies['@deepseek-ai/dsh-client-runtime'], undefined)
+  assert.equal(pkg.peerDependenciesMeta['@deepseek-ai/dsh-client-runtime'], undefined)
+  assert.ok(!pkg.dsh.client.inject.includes('@deepseek-ai/dsh-client-runtime'))
+  assert.equal(pkg.engines?.dsh, undefined)
+})
+
+test('built client bundle stays free of the retired client runtime', async () => {
+  const bundle = await readFile(new URL('../lib/client.js', import.meta.url), 'utf8')
+  assert.ok(bundle.includes('__ModuleLoader__.load'), 'client bundle must register through the DSH module loader')
+  assert.ok(!/require\(['"]@deepseek-ai\/dsh-client-runtime/.test(bundle), 'client bundle must not require the retired dsh-client-runtime package')
+  // 扫描全部发布的 client 声明文件，而不只是入口
+  const typesDir = new URL('../lib/types/client/', import.meta.url)
+  const declarations = (await readdir(typesDir, { recursive: true })).filter((file) => file.endsWith('.d.ts'))
+  assert.ok(declarations.length > 1, 'client declarations must be emitted')
+  for (const file of declarations) {
+    const text = await readFile(new URL(file, typesDir), 'utf8')
+    assert.ok(!/from ['"]@deepseek-ai\/dsh-client-runtime/.test(text), `${file} must not import the retired dsh-client-runtime package`)
+  }
 })
 
 test('all exported runtime and type files exist after build', async () => {

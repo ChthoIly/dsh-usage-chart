@@ -1,9 +1,9 @@
 /**
- * 最小 cordis Context 声明（自包含 vendored 类型）。
+ * 最小 cordis Context 声明（自包含 vendored 类型，仅宿主半区使用）。
  *
- * 说明：DSH 的客户端包（dsh-client-runtime / dsh-client-ui-slots 等）尚未
- * 对外发布稳定版本（npm 上仅 0.0.1-rc.1），因此本插件按「运行中的
- * dsh@0.1.0-rc.6」实际暴露的 API 形状 vendored 了所需的最小类型。
+ * 说明：本插件不把 DSH 内部包作为运行时/类型依赖（它们由运行中的 DSH 提供），
+ * 因此按 DSH 0.1.x – 0.2.x 实际暴露的宿主 API 形状 vendored 了所需的最小类型；
+ * 客户端半区的类型是 `src/client/context.ts`（同样自包含，见该文件）。
  * 宿主代码只做 type-only import，构建时被擦除，不影响运行。
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -16,31 +16,6 @@ export interface WebServer {
     path: string
     handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
   }): () => void
-}
-
-/** ui-slots 槽位注册选项（本插件用到的子集）。 */
-export interface SlotRegisterOptions {
-  name: string
-  id?: string
-  order?: number
-  priority?: number
-  registrant?: string
-  locale?: string
-}
-
-/** ui-slots 的 SlotRegistry 服务（register 返回卸载函数）。 */
-export interface SlotRegistry {
-  register(options: SlotRegisterOptions, component: unknown): () => void
-  /** 等待某个槽位声明出现后注册（声明生命周期内生效，随调用方 fiber 卸载）。 */
-  inject(key: string, callback: () => (() => void) | void): () => void
-}
-
-/** dsh-client-locale 的 locale 服务（本插件用到的面：订阅活动语言）。 */
-export interface LocaleService {
-  /** 当前语言快照（active = 'zh' | 'en'；语言切换或字典注册都会通知订阅者）。 */
-  getLocale(): { active: string; locales: readonly { id: string }[]; revision: number }
-  /** 订阅快照变化（监听器无参调用，自行重读 getLocale；返回退订函数）。 */
-  subscribe(listener: () => void): () => void
 }
 
 /** 会话日志事件的最小形状（assistant/chunk 与 assistant/message 携带 turn/step/usage）。 */
@@ -62,7 +37,7 @@ export interface SessionHandle {
   id: string
   /** 旧版 dsh-session（< 0.1.2-rc.1）的公开事件数组；新版已移除，改为 snapshotEvents()。 */
   events?: readonly SessionEventLike[]
-  /** 新版 dsh-session（>= 0.1.2-rc.1）的公开事件快照方法。 */
+  /** 新版 dsh-session（>= 0.1.2-rc.1，0.2.x 同样保留）的公开事件快照方法。 */
   snapshotEvents?: () => readonly SessionEventLike[]
 }
 export interface SessionStoreService {
@@ -78,16 +53,14 @@ export interface CredentialsService {
   resolve(ref: string): Promise<{ value: string; source?: string } | undefined>
 }
 
-/** cordis Context（本插件用到的面：effect + get + webServer + slots + sessions + locale）。 */
+/** cordis Context（本插件宿主半区用到的面：effect + get + webServer + sessions）。 */
 export interface Context {
   /** 注册一个资源释放器，插件卸载时执行。 */
   effect(disposer: () => (() => void) | void, label?: string): void
   /** 读取服务（反射层）：不要求 inject 声明；服务不存在返回 undefined。 */
   get(name: string, strict?: boolean): unknown
   webServer: WebServer
-  slots: SlotRegistry
   sessions: SessionStoreService
-  locale: LocaleService
   /** 可选服务（如 credentials）一律经 ctx.get 读取——未 inject 的服务属性访问会抛错。 */
   [key: string]: unknown
 }

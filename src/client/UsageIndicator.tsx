@@ -13,28 +13,29 @@ import { resolveCost, usePricing } from './pricing-api.ts'
 import { useHistoryRounds } from './rounds/history.ts'
 import { useObservedRounds } from './rounds/observed.ts'
 import { lastRoundModel, sameUsage, sumRoundCosts, usageDelta } from './rounds/summary.ts'
-import { useSessionNodes, type ChatNodesHook, type ConversationNode, type ConversationSnapshot } from './snapshot.ts'
+import { nodeModelName, useSessionNodes, type ChatNodesHook, type ConversationNode, type ConversationSnapshot } from './snapshot.ts'
 import type { ContextBreakdownData } from './diagnose/context.ts'
 import { UsagePanel } from './UsagePanel.tsx'
 
 export interface DockUsageProps {
-  /** 会话快照选择器（framework 标准套件）。 */
+  /** 会话快照选择器（framework 标准套件；0.1.x / 0.2.x 均由 ui-session 提供）。 */
   useSession: <S>(selector: (s: ConversationSnapshot) => S) => S
-  /** chat 快照选择器（framework 标准套件；0.1.2 起节点列表在这里）。 */
+  /** chat 快照选择器（framework 标准套件；0.1.2+ / 0.2.x 由 ui-chat 提供，节点列表在 legacy.nodes）。 */
   useChat?: ChatNodesHook
-  /** 投影读取钩子（framework 标准套件）。 */
+  /** 投影读取钩子（framework 标准套件；键名与载荷在 0.1.x / 0.2.x 不变）。 */
   useProjection: (key: 'tokenUsage' | 'contextPressure' | 'contextBreakdown') => unknown
   sessionId: string
-  session: ConversationSnapshot
-  input: unknown
+  /** 旧版（0.1.x）composer.dock owner props；0.2.x 不再传入，本插件不读取。 */
+  session?: ConversationSnapshot
+  input?: unknown
 }
 
 function deriveModel(nodes: readonly ConversationNode[]): string | undefined {
   for (let i = nodes.length - 1; i >= 0; i--) {
     const n = nodes[i]
     if (n.kind !== 'assistant') continue
-    if (n.provenance?.model !== undefined && n.provenance.model !== '') return n.provenance.model
-    if (n.requestConfig?.model !== undefined && n.requestConfig.model !== '') return n.requestConfig.model
+    const model = nodeModelName(n)
+    if (model !== undefined) return model
   }
   return undefined
 }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-usage-chart",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "DeepSeek 用量 / 成本 / 余额仪表盘 for DSH Web：输入框下方实时指标指示器 + 零依赖 SVG 用量可视化图表（含每轮成本视角、耗时叠加、异常标记、成本徽章、上下文压力条），token 数据来自官方 adapter 上报，成本按官方刊例价 + 用户覆盖 pricing.json 解析，余额来自官方 /user/balance 接口。",
   "type": "module",
   "sideEffects": false,
@@ -77,7 +77,6 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-slots"
@@ -87,17 +86,13 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/dsh-client-locale": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.0-rc.6 <0.2.0",
-    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.6 <0.2.0",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.0-rc.6 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.0-rc.6 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.6 <0.3.0-0",
     "react": "^18.2.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
-      "optional": true
-    },
-    "@deepseek-ai/dsh-client-runtime": {
       "optional": true
     },
     "@deepseek-ai/dsh-client-locale": {

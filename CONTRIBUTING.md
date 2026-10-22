@@ -19,4 +19,4 @@ environment variables — see the README's development section for the table.
 
 ## Compatibility
 
-This plugin follows DSH 0.1.x Host/Client bundle conventions. Changes to injected services, slots, module-loader externals, or `cordis.patch.yml` must include an installation smoke test against a clean Web profile.
+This plugin supports DSH 0.1.x and 0.2.x Host/Client bundle conventions; its peer ranges cover both. `@deepseek-ai/dsh-client-runtime` was retired in DSH 0.2.0 — do not reintroduce imports, build externals, or peer entries for it. Changes to injected services, slots, module-loader externals, or `cordis.patch.yml` must include an installation smoke test against a clean Web profile.
