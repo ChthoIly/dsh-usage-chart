@@ -27,11 +27,11 @@
 | [feibi-mochi/deepseek-harness-wallet](https://github.com/feibi-mochi/deepseek-harness-wallet) | 余额告警；官方/非官方数据明确分层 | 多 provider 分账、充值跳转（远期可选） |
 | [nonewind/dsh-spend](https://github.com/nonewind/dsh-spend) | 多维度统计的组织方式 | 多提供商账本、订阅额度——远期也不正面重叠 |
 
-## 3. 可行性验证（@ DeepSeek Harness 0.1.0-rc.6，源码实测）
+## 3. 数据源契约（0.1.x 历史验证 + 0.2.x 适配）
 
 以下结论来自本机安装的 `@deepseek-ai/dsh@0.1.0-rc.6` 源码
 （`dsh-session`、`dsh-token-meter`、`dsh-compaction`、`dsh-session-projection`），
-不是猜测。若将来 API 变化，以官方包为准复核本节。
+以下 3.1–3.4 保留该版本的历史验证记录，不代表新版运行时已逐项安装验收。当前 0.2.x 差异与验证边界见 3.5；API 变化时以对应官方版本复核。
 
 ### 3.1 每个会话事件都带时间戳
 
@@ -46,7 +46,7 @@ export type SessionEvent = {
 }
 ```
 
-### 3.2 可消费的会话事件词汇表
+### 3.2 0.1.x 历史事件词汇表
 
 | 事件 | 载荷要点 | 路线图用途 |
 |---|---|---|
@@ -73,6 +73,20 @@ export type SessionEvent = {
 - v0.2 全部数据源 ✅ 已验证；
 - v1.1 上下文组成用 `contextBreakdown` 投影，压缩用 `compaction/summary.shadowedTokenCount` ✅ 已验证；
 - v1.1 跨会话历史：官方另有 `dsh-session-query`（SQLite FTS5）与 `dsh-session-stats` 可作为宿主侧聚合的参考，实施时再验证。
+
+### 3.5 DSH 0.2.x 适配（v1.1.8）
+
+对照版本为 DSH 0.2.1-rc.2；实现与测试位于 `src/usage/rounds.ts`、`src/client/snapshot.ts`、`tests/rounds.test.mjs` 和 `tests/merge-regression.test.mjs`。
+
+| 契约 | 0.2.x 行为与插件适配 |
+|---|---|
+| 插件准入 / 类型 | peer 范围 `>=0.1.0-rc.6 <0.3.0-0`；移除退役的 `dsh-client-runtime` peer/inject，客户端最小 Context 类型自包含 |
+| 助手用量 | 不再依赖 `assistant/chunk`；`assistant/message` 优先取 `data.usage`，缺席时回退 stream 最后一条 usage；`assistant/attempt.stream` 中的失败请求也计费，重试尝试独立累计 |
+| TTFT / TPS | TTFT 取轮次起点至首个携带 token 的片段；TPS 使用各次请求流式生成时长之和，不含工具/步骤间等待；无流时间线的旧日志保留旧锚点 |
+| 模型身份 | 实时节点按 `provenance` → `providerMetadata` → `requestConfig` 回退；宿主历史仍以 request/context 等事件归因 |
+| 输入来源 | 对象 `{ kind }` 归一化：人工、Agent/运行时注入、目标续跑；旧字符串路径保留 |
+
+**验证边界**：回归测试覆盖两代事件形状。PR 作者报告了 0.2.1-rc.2 链接构建浏览器冒烟，不等于两条版本线的干净 profile 安装验收；移除 runtime inject 后尚未重跑 0.1.x 实机安装。发布记录须区分单测、链接构建冒烟和干净 profile 安装。
 
 ## 4. 最优先工程项：价格治理
 
@@ -201,6 +215,12 @@ pricing 解析优先级（host 侧，每次请求实时解析）：
 **交付记录（2026-08-26）**：
 - 纯函数纯模块：零运行时依赖，测试集由 31 项扩充至 **39 项全绿**；
 - 中英双语完整覆盖；深浅主题自适应；保持键盘可达。
+
+### ✅ v1.1.8 — DSH 0.2.x 适配 · 已合并，发布准备中
+
+- PR #19 已合并；完成 peer 范围、客户端类型、模型身份、失败/重试计费、首 token 时序与来源格式适配，细节见 §3.5 与双语 CHANGELOG。
+- 发布准备同步 npm lockfile 根元数据、README 截图打包清单和当前架构说明，并补充对应回归测试。
+- 合并不等于 npm 发布；最终提交须通过验证后再创建 Release。测试数量以当前 `npm run verify` 为准，历史交付记录的数量保持不变。
 
 ### ⚡ v1.1.x — 工程性能与交互体验收敛（高性价比优化）
 

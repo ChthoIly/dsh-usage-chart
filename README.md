@@ -49,10 +49,10 @@ Click ▸ to open the dashboard panel:
 | Token usage | DSH official adapter session projections (`tokenUsage` / `contextPressure`) | ✅ Official real-time data |
 | Cost | Official list price (builtin + optional `pricing.json` override, CNY/USD dual-currency / 1M tokens, peak/off-peak tiers) × reported usage | ⚠️ Estimate, not invoice; resolved via Host `/pricing` snapshot |
 | Display currency | Host `/meta` config; costs directly calculated in selected currency list price | ✅ Official dual-currency list price |
-| Per-round history | Host session log fold (`/usage`): duration / TTFT / TPS / model attribution / **input source attribution** / end reason / per-round cost. DSH 0.2.x derives TTFT/TPS from `assistant/message.stream`; 0.1.x falls back to chunk/usage anchors | ✅ Official event stream fold |
+| Per-round history | Host session log fold (`/usage`): duration / TTFT / TPS / model attribution / **input source attribution** / end reason / per-round cost. DSH 0.2.x counts `assistant/message` and failed `assistant/attempt` usage (including stream-only samples); TTFT uses the first token-bearing fragment, and TPS uses summed per-attempt generation time; 0.1.x keeps chunk/usage anchors | ✅ Official event stream fold |
 | Context & compaction | Official `contextBreakdown` / `contextPressure` projections + Host `compaction/*` event fold | ✅ Official projections + event fold |
 | Balance | Official `GET https://api.deepseek.com/user/balance` | ✅ Official real-time data |
-| Model name | Adapter `providerMetadata` (DSH 0.2.x) / request provenance / `request/context` (DSH 0.1.x) | ✅ Official real-time data |
+| Model name | Host history: `request/context` → `request/header` → last model; live nodes: `provenance` (0.1.x) → `providerMetadata` (0.2.x) → `requestConfig` | ✅ Official real-time data |
 
 ## Tech stack
 
@@ -193,13 +193,13 @@ A: `npx @deepseek-ai/dsh` runs transiently and installs no global command. Run `
 A: Harmless — react is provided by the DSH Web platform in the browser; the profile does not need it. Plugin ≥ 0.1.1 marks react as an optional peer.
 
 **Q: DSH 0.2.x warns `dsh-usage-chart@1.1.7 与 DSH 0.2.1-rc.2 不兼容（要求 @deepseek-ai/dsh-client-locale >=0.1.0-rc.6 <0.2.0, ...）…` — is the plugin incompatible?**
-A: That warning comes from DSH 0.2.x's **plugin admission gate**, not from a damaged DSH install and not from data loss: DSH refuses to load a plugin whose `@deepseek-ai/dsh*` peer ranges do not match the running runtime version, and plugin 1.1.x declared 0.1.x-only ranges. Upgrade the plugin to **≥ 1.1.8** (`dsh plugin --profile web add dsh-usage-chart@1.1.8`), then restart `dsh web` and reload the DSH Web page if it was already open. DSH itself was not damaged and no session data, costs, or credentials were lost — the plugin simply was not loaded.
+A: That warning comes from DSH 0.2.x's **plugin admission gate**, not from a damaged DSH install and not from data loss: DSH refuses to load a plugin whose `@deepseek-ai/dsh*` peer ranges do not match the running runtime version, and plugin versions through 1.1.7 declared 0.1.x-only ranges. Upgrade the plugin to **≥ 1.1.8** (`dsh plugin --profile web add dsh-usage-chart@1.1.8`), then restart `dsh web` and reload the DSH Web page if it was already open. DSH itself was not damaged and no session data, costs, or credentials were lost — the plugin simply was not loaded.
 
 **Q: The balance still shows `–` / "not configured" after setting the API key in the web UI?**
 A: Make sure the plugin is ≥ 0.1.1, then restart `dsh web`. As a stopgap, set `DEEPSEEK_API_KEY` or `config.apiKey`.
 
 **Q: `add` reports `dsh-usage-chart is not in the npm registry`?**
-A: Use "Option 3: local directory" to test, or wait for the maintainer to publish.
+A: Check the package name, requested version, and registry connectivity. A version in Git is not necessarily published to npm: use `npm view dsh-usage-chart version` to check the current release and `npm view dsh-usage-chart@<version> version` to check a specific version. For unreleased source, use "Option 3: local directory" and rebuild before testing.
 
 ## Development
 
@@ -231,11 +231,13 @@ node scripts/verify-render.mjs # Full render verification (light/dark themes, ZH
 
 ## Maintainer releases
 
-For the first release, complete npm account verification and run `npm publish --access public` locally. Once the package exists on npm, configure Trusted Publishing for this repository. Subsequent GitHub Releases publish new versions through the workflow.
+The package already exists on npm. The repository's `release.yml` workflow publishes through npm Trusted Publishing (the npm Trusted Publisher and GitHub `npm` environment must be configured by the maintainer); ordinary releases do not require local `npm publish`.
 
-1. Ensure `package.json` and `CHANGELOG.md` versions match and run `npm run verify`.
-2. Create `v<version>` GitHub Release.
-3. `release.yml` publishes the prebuilt package via npm Trusted Publishing with provenance.
+1. Use `npm` and the committed `package-lock.json`, matching CI. Keep the manifest and lockfile root versions, dependency ranges, and peer metadata in sync; do not bump an already-prepared version again.
+2. Update both READMEs and changelogs, plus architecture/roadmap notes when contracts change. Keep the version entry pending until release, then set its actual release date. Record clean-profile installation evidence separately for each supported DSH line; never infer it from unit tests.
+3. Run `npm ci`, `npm run verify`, and `npm pack --dry-run`. Rebuild before linking a local checkout: ignored `lib/` output may still belong to an older version. Check preview images and exported runtime/type files in the package list.
+4. Commit the release-preparation changes and wait for CI on the final commit. Create `v<version>` GitHub Release with its tag pointing to that exact commit. Merging source alone does not publish npm packages.
+5. Confirm the release workflow succeeds and `npm view dsh-usage-chart@<version> version` returns the expected version; only then recommend the npm upgrade command. The workflow skips a version already present on npm.
 
 ## Plugin architecture
 
@@ -256,6 +258,7 @@ dsh-usage-chart/
 │   │   └── compactions.ts # CompactionFold: compaction range/freed tokens/summarize dual-currency cost
 │   └── client/
 │       ├── index.ts      # Client entry: registers composer.dock + assistant-actions slots
+│       ├── context.ts    # Self-contained slots/locale context types (no retired runtime import)
 │       ├── UsageIndicator.tsx  # Dock indicator line (with 3-segment colored pressure bar)
 │       ├── UsagePanel.tsx      # Visual dashboard panel composition root
 │       ├── charts.tsx          # Zero-dependency SVG/HTML primitives (bars / legends)
@@ -269,7 +272,7 @@ dsh-usage-chart/
 │       ├── currency.ts         # Currency store (/meta config + switch + /rate refresh)
 │       ├── balance.ts          # Balance query hook (proxied through Host)
 │       └── styles.ts           # Injected CSS (<style data-plugin>)
-└── types/                # Vendored minimal type declarations
+└── types/                # Minimal Host Cordis types; Client types live in src/client/context.ts
 ```
 
 ## Data and security boundaries
@@ -284,10 +287,12 @@ dsh-usage-chart/
 
 | Component | Supported |
 |---|---|
-| DSH | ≥ 0.1.0-rc.6, including 0.2.x (tested against 0.2.1-rc.2); peer ranges cover both the 0.1.x and 0.2.x client SDKs (v1.1.8), and the `/usage` route reads events via the `dsh-session` `snapshotEvents()` API with a legacy `events` fallback (`Session.events` was removed in `0.1.2-rc.1`) |
+| DSH | Declared peer range: `>=0.1.0-rc.6 <0.3.0-0` (0.1.x / 0.2.x). The `/usage` route prefers `snapshotEvents()` with a legacy `events` fallback (`Session.events` was removed in `0.1.2-rc.1`). See validation scope below. |
 | Node.js | ≥ 20 |
 | Web UI | React 18 / `conversation.composer.dock` + `conversation.chat.assistant-actions` |
 | OS | macOS, Linux, Windows (pure JavaScript, no native dependencies) |
+
+Validation scope for v1.1.8: regression tests cover both event shapes. The compatibility PR author reported a linked-build browser smoke test on DSH 0.2.1-rc.2; this is not evidence of clean-profile installation on both lines. No live 0.1.x installation was re-run after removing `dsh-client-runtime` from `dsh.client.inject`. Record each runtime/version and clean-profile result before claiming full installation coverage.
 
 ## Community and open source
 

@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/). 中文版见 [CHANGELOG_ZH.md](./CHANGELOG_ZH.md).
 
-## [1.1.8] - 2026-10-21
+## [1.1.8] - 2026-10-22
 
 ### Fixed
 
@@ -19,9 +19,14 @@ All notable changes to this project are documented here. The format follows [Kee
   - Output TPS divides output tokens by the summed streaming time of each `assistant/message` / `assistant/attempt`, so tool execution and the wait between steps no longer drag it down; a turn whose output arrives as a single fragment reports no TPS. Logs without a stream timeline keep the 0.1.x anchors (first usage sample → turn end).
   - `user/message.source` changed from a string to a `{ kind }` object. `user` and `user-*` map to `human`, goal/continuation and agent kinds keep their name, and other runtime injections such as `tool-jobs` become `agent.<kind>`, so the input-source label no longer shows them as human.
 
+### Release preparation
+
+- Synchronize the npm lockfile root peer ranges/metadata with `package.json`, removing the retired runtime entries without upgrading the locked dependency versions.
+- Include the exact preview screenshot filenames referenced by both READMEs in the npm package, and update the bilingual documentation, architecture, roadmap, and release checklist. Add manifest regressions for lockfile-root consistency and preview inclusion.
+
 ### Tests
 
-- New manifest tests assert the widened peer ranges, that the retired `@deepseek-ai/dsh-client-runtime` peer/inject entry is gone, and that the built client bundle and published client type declarations no longer reference the retired package. New fold tests feed DSH 0.2.x-shaped logs (no `assistant/chunk`, `assistant/message` / `assistant/attempt` with `usage` + `stream`, object `user/message.source`) and assert totals, stream-only usage, TTFT from token-bearing records (raw delta chunks, name-bearing tool-call fragments), TPS over streaming time across steps, failed-attempt and retry billing, and source normalization; the retired-runtime check now scans every published client `.d.ts`; a client test covers the `provenance` → `providerMetadata` → `requestConfig` model fallback. `npm run verify` passes (typecheck + build + `node --test`, all 55 tests). The compatibility surface was checked against the installed DSH 0.2.1-rc.2 app bundle and the published 0.2.1-rc.2 package typings, and a headless-browser smoke test of a DSH 0.2.1-rc.2 Web instance loaded the linked 1.1.8 build: the boot graph included the plugin, the dock indicator rendered live usage/cost against a real session (zh copy through the `locale` service) and the expanded panel rendered session totals, context breakdown and the token projections, with no plugin console errors.
+- New manifest tests assert the widened peer ranges, that the retired `@deepseek-ai/dsh-client-runtime` peer/inject entry is gone, and that the built client bundle and published client type declarations no longer reference the retired package. New fold tests feed DSH 0.2.x-shaped logs (no `assistant/chunk`, `assistant/message` / `assistant/attempt` with `usage` + `stream`, object `user/message.source`) and assert totals, stream-only usage, TTFT from token-bearing records (raw delta chunks, name-bearing tool-call fragments), TPS over streaming time across steps, failed-attempt and retry billing, and source normalization; the retired-runtime check now scans every published client `.d.ts`; a client test covers the `provenance` → `providerMetadata` → `requestConfig` model fallback. `npm run verify` passes (typecheck + build + `node --test`, all 57 tests). The compatibility surface was checked against the installed DSH 0.2.1-rc.2 app bundle and the published 0.2.1-rc.2 package typings, and a headless-browser smoke test of a DSH 0.2.1-rc.2 Web instance loaded the linked 1.1.8 build: the boot graph included the plugin, the dock indicator rendered live usage/cost against a real session (zh copy through the `locale` service) and the expanded panel rendered session totals, context breakdown and the token projections, with no plugin console errors.
 
 ## [1.1.7] - 2026-09-24
 

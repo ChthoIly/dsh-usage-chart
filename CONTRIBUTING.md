@@ -4,11 +4,11 @@ Thanks for improving `dsh-usage-chart`.
 
 ## Development workflow
 
-1. Use Node.js 20 or newer and install dependencies with `npm ci`.
+1. Use Node.js 20 or newer and install dependencies with `npm ci`; the release workflow uses Node.js 24. The committed npm lockfile is the CI/release source of truth. Do not introduce a second package-manager lockfile unless the workflow is deliberately migrated.
 2. Keep Host-only code in `src/index.ts` and browser code in `src/client/`.
 3. Add or update tests for behavior changes.
 4. Run `npm run verify` and `npm pack --dry-run` before opening a pull request.
-5. Update `CHANGELOG.md` for user-visible changes.
+5. Update both changelogs and READMEs for user-visible changes; keep architecture/roadmap notes current when contracts change. Leave the release entry pending until publication, then record its actual date.
 
 Pull requests should be focused and should not include generated `lib/`, local profiles, API keys, logs, or screenshots containing account information.
 
@@ -19,4 +19,6 @@ environment variables — see the README's development section for the table.
 
 ## Compatibility
 
-This plugin supports DSH 0.1.x and 0.2.x Host/Client bundle conventions; its peer ranges cover both. `@deepseek-ai/dsh-client-runtime` was retired in DSH 0.2.0 — do not reintroduce imports, build externals, or peer entries for it. Changes to injected services, slots, module-loader externals, or `cordis.patch.yml` must include an installation smoke test against a clean Web profile.
+This plugin supports DSH 0.1.x and 0.2.x Host/Client bundle conventions; its peer ranges cover both. `@deepseek-ai/dsh-client-runtime` was retired in DSH 0.2.0 — do not reintroduce imports, build externals, or peer entries for it. Changes to injected services, slots, module-loader externals, or `cordis.patch.yml` must include clean Web-profile installation evidence for each supported DSH line. Record the exact runtime/plugin versions, installation source, and result separately. Unit/shape tests or a linked-build browser probe do not certify clean-profile installation; explicitly document any untested line.
+
+Before a release, check `package.json` against the lockfile root (including peer metadata), run `npm run verify`, and inspect `npm pack --dry-run` for the exported runtime/type files and README screenshots. Tag the final verified commit, not an earlier merge commit.

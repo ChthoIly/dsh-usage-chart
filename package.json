@@ -44,8 +44,8 @@
     "SUPPORT.md",
     "THIRD_PARTY_NOTICES.md",
     "cordis.patch.yml",
-    "docs/images/usage-panel-demo-en-light.png",
-    "docs/images/usage-panel-demo-zh-dark.png",
+    "docs/images/usage-panel-demo-en-lightv1.0.0.png",
+    "docs/images/usage-panel-demo-zh-darkv1.0.0.png",
     "lib",
     "src"
   ],

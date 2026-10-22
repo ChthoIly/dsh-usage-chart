@@ -3,6 +3,27 @@ import { access, readdir, readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'))
+
+test('npm lockfile root metadata matches the package manifest', () => {
+  assert.equal(lock.name, pkg.name)
+  assert.equal(lock.version, pkg.version)
+  for (const key of ['name', 'version', 'engines', 'devDependencies', 'peerDependencies', 'peerDependenciesMeta']) {
+    assert.deepEqual(lock.packages[''][key], pkg[key], `lockfile root ${key} must match package.json`)
+  }
+})
+
+test('README screenshots exist and are included in the published files', async () => {
+  for (const file of ['README.md', 'README_ZH.md']) {
+    const markdown = await readFile(new URL(`../${file}`, import.meta.url), 'utf8')
+    const images = [...markdown.matchAll(/<img\b[^>]*\bsrc="\.\/([^"#?]+)"/g)]
+    assert.ok(images.length > 0, `${file} must contain preview screenshots`)
+    for (const [, path] of images) {
+      assert.ok(pkg.files.includes(path), `${file}: ${path} must be listed in package.json files`)
+      await access(new URL(`../${path}`, import.meta.url))
+    }
+  }
+})
 
 /**
  * DSH 客户端包 peer：范围必须同时容纳 0.1.x（如 0.1.0-rc.6）与 0.2.x（如 0.2.1-rc.2）。

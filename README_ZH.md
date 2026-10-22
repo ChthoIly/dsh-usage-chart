@@ -49,10 +49,10 @@
 | token 用量 | DSH 官方 adapter 上报的会话投影（`tokenUsage` / `contextPressure`） | ✅ 官方真实数据，实时更新 |
 | 成本 | 官方刊例价（内置表 + 可选用户覆盖 `pricing.json`，CNY/USD 双币种 /1M tokens，高峰/空闲双时段）× adapter 上报用量 | ⚠️ 估算值，非官方账单；价格经宿主 `/pricing` 单点解析 |
 | 成本币种 | 宿主 `/meta` 下发配置；成本按所选币种的官方刊例价直接计算（不做汇率换算） | ✅ 官方双币种刊例价 |
-| 轮次明细 | 宿主会话日志折叠（`/usage`）：耗时 / TTFT / TPS / 模型归因 / **输入来源归因** / 结束原因 / 每轮成本。DSH 0.2.x 用 `assistant/message.stream` 推导 TTFT/TPS，0.1.x 回退到 chunk/usage 锚点 | ✅ 官方事件流折叠 |
+| 轮次明细 | 宿主会话日志折叠（`/usage`）：耗时 / TTFT / TPS / 模型归因 / **输入来源归因** / 结束原因 / 每轮成本。DSH 0.2.x 累计 `assistant/message` 与失败的 `assistant/attempt` 用量（含仅在 stream 中的样本）；TTFT 取首个携带 token 的片段，TPS 按各次请求生成时长之和计算；0.1.x 保留 chunk/usage 锚点 | ✅ 官方事件流折叠 |
 | 上下文与压缩诊断 | 官方 `contextBreakdown` / `contextPressure` 投影 + 宿主 `compaction/*` 事件折叠 | ✅ 官方投影 + 事件流折叠 |
 | 余额 | 官方 `GET https://api.deepseek.com/user/balance` | ✅ 官方实时数据 |
-| 模型名 | adapter 上报的 `providerMetadata`（DSH 0.2.x）/ 请求 provenance / `request/context`（DSH 0.1.x） | ✅ 官方真实数据 |
+| 模型名 | 宿主历史：`request/context` → `request/header` → 最近模型；实时节点：`provenance`（0.1.x）→ `providerMetadata`（0.2.x）→ `requestConfig` | ✅ 官方真实数据 |
 
 ## 技术栈
 
@@ -237,14 +237,14 @@ A：正常且无害——react 由 DSH Web 平台在浏览器端内置，profile
 已把 react 标记为可选 peer，不再报警；0.1.0 的该警告可忽略。
 
 **Q：DSH 0.2.x 提示 `dsh-usage-chart@1.1.7 与 DSH 0.2.1-rc.2 不兼容（要求 @deepseek-ai/dsh-client-locale >=0.1.0-rc.6 <0.2.0, ...）…`，是插件不兼容吗？**
-A：该警告来自 DSH 0.2.x 的**插件准入校验**，不是 DSH 装坏了，也不会丢数据：当插件的 `@deepseek-ai/dsh*` peer 范围不匹配当前运行时版本时 DSH 会拒绝加载，而插件 1.1.x 声明的是仅 0.1.x 的范围。把插件升级到 **≥ 1.1.8**（`dsh plugin --profile web add dsh-usage-chart@1.1.8`）后重启 `dsh web`；若 DSH Web 页面已打开，再刷新页面即可。DSH 本身未受损，会话数据、成本记录与凭据均未丢失——插件只是没有被加载。
+A：该警告来自 DSH 0.2.x 的**插件准入校验**，不是 DSH 装坏了，也不会丢数据：当插件的 `@deepseek-ai/dsh*` peer 范围不匹配当前运行时版本时 DSH 会拒绝加载，而截至 1.1.7 的插件声明的是仅 0.1.x 的范围。把插件升级到 **≥ 1.1.8**（`dsh plugin --profile web add dsh-usage-chart@1.1.8`）后重启 `dsh web`；若 DSH Web 页面已打开，再刷新页面即可。DSH 本身未受损，会话数据、成本记录与凭据均未丢失——插件只是没有被加载。
 
 **Q：网页端配了 API Key，余额仍显示 `–` 或「未配置」？**
 A：请确认插件版本 ≥ 0.1.1（0.1.1 起余额查询才走 DSH 凭据服务读取网页端密钥）；
 升级后重启 `dsh web`。临时方案：先设环境变量 `DEEPSEEK_API_KEY` 或 `config.apiKey`。
 
 **Q：`add` 时报 `dsh-usage-chart is not in the npm registry`？**
-A：包尚未发布到 npm。请用「方式三：本地目录安装」测试，或等待维护者发布后重试。
+A：先检查包名、指定版本与 npm registry 的连通性。Git 中的版本不一定已发布到 npm：用 `npm view dsh-usage-chart version` 查看当前发布版本，用 `npm view dsh-usage-chart@<version> version` 检查指定版本。尚未发布的源码可按「方式三：本地目录安装」构建后测试。
 
 ## 参与开发
 
@@ -280,14 +280,15 @@ node scripts/verify-render.mjs # 完整渲染验证（含明暗主题、中英�
 
 ## 维护者发布
 
-首次发布需要先在本地完成 npm 的账户验证并执行 `npm publish --access public`；包在 npm 上创建成功后，再为仓库配置 Trusted Publisher。之后创建 GitHub Release 即会由工作流发布新版本。工作流会检测版本是否已存在，因此补建 `v0.1.0` Release 时不会重复发布。
+本包已经存在于 npm。仓库的 `release.yml` 通过 npm Trusted Publishing 发布（npm Trusted Publisher 与 GitHub 的 `npm` environment 须由维护者配置）；常规发版无需本地执行 `npm publish`。
 
-1. 确认 `package.json` 与 `CHANGELOG.md` 版本一致并执行 `npm run verify`。
-2. 创建 `v<version>` GitHub Release。
-3. `release.yml` 通过 npm Trusted Publishing 发布带 provenance 的预构建包。
-4. 在 GitHub 添加 `dsh-plugin`、`dsh`、`deepseek-harness` topics，供 Awesome DSH Plugin 自动发现。
+1. 与 CI 一致，使用 `npm` 和已提交的 `package-lock.json`。同步 manifest 与 lockfile 根节点的版本、依赖范围和 peer 元数据；已准备好的版本不要再次递增。
+2. 同步双语 README、CHANGELOG，以及发生契约变化的架构文档/路线图。版本条目发布前保持待发布，正式发版时填写实际日期。分别记录所支持 DSH 版本线的干净 profile 安装结果，不把单元测试视为安装验收。
+3. 执行 `npm ci`、`npm run verify` 和 `npm pack --dry-run`。本地链接安装前必须重新构建：被忽略的 `lib/` 可能仍是旧版产物。检查打包清单中的截图与导出的运行时/类型文件。
+4. 提交发布准备修改，等待最终提交的 CI 通过，再创建 `v<version>` GitHub Release；tag 必须指向该最终提交。仅合并源码不会发布到 npm。
+5. 确认发布工作流成功，且 `npm view dsh-usage-chart@<version> version` 返回目标版本后，再推荐 npm 升级命令。工作流会跳过已发布的版本。
 
-首次发布前，需要在 npm 包设置中把本仓库的 `release.yml` 配置为 Trusted Publisher，并在 GitHub 创建 `npm` environment。
+仓库发现标签继续使用 `dsh-plugin`、`dsh`、`deepseek-harness`。
 
 ## 插件结构
 
@@ -308,6 +309,7 @@ dsh-usage-chart/
 │   │   └── compactions.ts # CompactionFold：压缩裁剪范围/释放Token/summarize双币种成本（纯函数）
 │   └── client/
 │       ├── index.ts      # client 入口：注册 composer.dock + assistant-actions 槽位
+│       ├── context.ts    # 自包含 slots/locale Context 类型（不再依赖退役 runtime）
 │       ├── UsageIndicator.tsx  # 输入框下方一行指示器（含三段着色细压力条）
 │       ├── UsagePanel.tsx      # 可视化面板（汇总 / 诊断 / 成本 / 每轮图表 / 余额）编排根
 │       ├── charts.tsx          # 零依赖 SVG/HTML 原语（堆叠条/图例）
@@ -321,7 +323,7 @@ dsh-usage-chart/
 │       ├── currency.ts         # 币种/汇率 store（/meta 配置 + 切换 + /rate 刷新）
 │       ├── balance.ts          # 余额读取 hook（经宿主代理）
 │       └── styles.ts           # 注入样式（<style data-plugin>）
-└── types/                # vendored 最小类型声明（DSH client 包未发布稳定版）
+└── types/                # 宿主 Cordis 最小类型声明；客户端类型在 src/client/context.ts
 ```
 
 ## 数据与安全边界
@@ -337,10 +339,12 @@ dsh-usage-chart/
 
 | 组件 | 支持范围 |
 |---|---|
-| DSH | ≥ 0.1.0-rc.6，含 0.2.x（已在 0.2.1-rc.2 上验证）；peer 范围同时覆盖 0.1.x 与 0.2.x 两代 client SDK（v1.1.8），`/usage` 路由通过 `dsh-session` 的 `snapshotEvents()` API 读取事件，并保留旧版 `events` 属性回退（`Session.events` 自 `0.1.2-rc.1` 起移除） |
+| DSH | 声明的 peer 范围：`>=0.1.0-rc.6 <0.3.0-0`（0.1.x / 0.2.x）。`/usage` 优先通过 `snapshotEvents()` 读取事件，保留旧版 `events` 属性回退（`Session.events` 自 `0.1.2-rc.1` 起移除）。验证范围见下文。 |
 | Node.js | ≥ 20 |
 | Web UI | React 18 / `conversation.composer.dock` + `conversation.chat.assistant-actions` |
 | 系统 | macOS、Linux、Windows（纯 JavaScript，无原生依赖） |
+
+v1.1.8 验证范围：回归测试覆盖两代事件形状。兼容性 PR 作者报告了 DSH 0.2.1-rc.2 链接构建的浏览器冒烟测试，但这不等于两条版本线均已完成干净 profile 安装验收。移除 `dsh.client.inject` 中的 `dsh-client-runtime` 后，尚未重新进行 0.1.x 实机安装测试。声称完整安装覆盖前，应分别记录运行时版本与干净 profile 测试结果。
 
 ## 社区与开源
 

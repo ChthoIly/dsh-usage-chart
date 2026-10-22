@@ -3,7 +3,7 @@
 本文件记录本项目所有重要变更。格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。英文版见 [CHANGELOG.md](./CHANGELOG.md)。
 
-## [1.1.8] - 2026-10-21
+## [1.1.8] - 2026-10-22
 
 ### 修复
 
@@ -20,9 +20,14 @@
   - 输出吞吐 = 输出 token ÷ 各条 `assistant/message` / `assistant/attempt` 流式时长之和，不再被工具执行与步骤间等待拉低；整轮输出只有一个片段时不报吞吐。没有流时间线的日志沿用 0.1.x 口径（首个 usage 样本 → 轮次结束）。
   - `user/message.source` 由字符串改为 `{ kind }` 对象：`user` 与 `user-*` 归为 `human`，目标续跑与 Agent 类来源保留原名，`tool-jobs` 等其他运行时注入记为 `agent.<kind>`，来源标签不再把它们显示为人工。
 
+### 发布准备
+
+- 同步 npm lockfile 根节点的 peer 范围与元数据，移除退役 runtime 条目，不升级已锁定的依赖版本。
+- npm 包收录双语 README 实际引用的截图文件名；同步双语文档、架构、路线图和发布检查清单；新增 lockfile 根元数据一致性与截图收录回归。
+
 ### 测试
 
-- 新增 manifest 测试断言放宽后的 peer 范围、退役的 `@deepseek-ai/dsh-client-runtime` peer/inject 条目已移除，以及构建后的 client bundle 与发布的 client 类型声明均不再引用该退役包。新增折叠测试喂入 DSH 0.2.x 形状的日志（无 `assistant/chunk`、`assistant/message` / `assistant/attempt` 带 `usage` + `stream`、`user/message.source` 为对象），断言 token 汇总、仅在流中的用量、由携带 token 的记录（原始 delta chunk、带工具名的 tool-call 片段）推导的 TTFT、跨步骤按流式时长计算的 TPS、失败尝试与重试计费，以及来源归一化；退役 runtime 检查改为扫描全部发布的 client `.d.ts`；另有 client 测试覆盖 `provenance` → `providerMetadata` → `requestConfig` 模型回退。`npm run verify` 全部通过（typecheck + build + `node --test`，共 55 项测试）。兼容面已对照本机安装的 DSH 0.2.1-rc.2 应用包与已发布的 0.2.1-rc.2 包类型声明核实；并在 DSH 0.2.1-rc.2 Web 实例上用 headless 浏览器完成加载冒烟测试：boot 图中包含本插件，输入框下方指示器在真实会话上渲染出实时用量/成本（经 `locale` 服务显示中文），展开面板渲染出会话汇总、上下文构成与投影数据，且无插件控制台错误。
+- 新增 manifest 测试断言放宽后的 peer 范围、退役的 `@deepseek-ai/dsh-client-runtime` peer/inject 条目已移除，以及构建后的 client bundle 与发布的 client 类型声明均不再引用该退役包。新增折叠测试喂入 DSH 0.2.x 形状的日志（无 `assistant/chunk`、`assistant/message` / `assistant/attempt` 带 `usage` + `stream`、`user/message.source` 为对象），断言 token 汇总、仅在流中的用量、由携带 token 的记录（原始 delta chunk、带工具名的 tool-call 片段）推导的 TTFT、跨步骤按流式时长计算的 TPS、失败尝试与重试计费，以及来源归一化；退役 runtime 检查改为扫描全部发布的 client `.d.ts`；另有 client 测试覆盖 `provenance` → `providerMetadata` → `requestConfig` 模型回退。`npm run verify` 全部通过（typecheck + build + `node --test`，共 57 项测试）。兼容面已对照本机安装的 DSH 0.2.1-rc.2 应用包与已发布的 0.2.1-rc.2 包类型声明核实；并在 DSH 0.2.1-rc.2 Web 实例上用 headless 浏览器完成加载冒烟测试：boot 图中包含本插件，输入框下方指示器在真实会话上渲染出实时用量/成本（经 `locale` 服务显示中文），展开面板渲染出会话汇总、上下文构成与投影数据，且无插件控制台错误。
 
 ## [1.1.7] - 2026-09-24
 
