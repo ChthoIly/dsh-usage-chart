@@ -339,7 +339,7 @@ dsh-usage-chart/
 
 | 组件 | 支持范围 |
 |---|---|
-| DSH | 声明的 peer 范围：`>=0.1.0-rc.6 <0.3.0-0`（0.1.x / 0.2.x）。`/usage` 优先通过 `snapshotEvents()` 读取事件，保留旧版 `events` 属性回退（`Session.events` 自 `0.1.2-rc.1` 起移除）。验证范围见下文。 |
+| DSH | 声明的 peer 范围：`>=0.1.0-rc.6 <0.3.0-0`（0.1.x / 0.2.x）。DSH 0.2.x 在声明 `engines.dsh` 时优先按它判断，否则回退到匹配 `@deepseek-ai/dsh*` peer 范围；本插件有意保留 peer 回退，使每个客户端 SDK 包分别受版本门禁约束。`/usage` 优先通过 `snapshotEvents()` 读取事件，保留旧版 `events` 属性回退（`Session.events` 自 `0.1.2-rc.1` 起移除）。验证范围见下文。 |
 | Node.js | ≥ 20 |
 | Web UI | React 18 / `conversation.composer.dock` + `conversation.chat.assistant-actions` |
 | 系统 | macOS、Linux、Windows（纯 JavaScript，无原生依赖） |

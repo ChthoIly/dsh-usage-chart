@@ -10,7 +10,7 @@
 - **兼容 DSH 0.2.x（插件准入校验）**——DSH 0.2.1-rc.2 在启动时执行插件准入校验：除非 `package.json` 声明了 `engines.dsh`，否则所有包名为 `@deepseek-ai/dsh` 或 `@deepseek-ai/dsh-*` 的 `peerDependencies` 范围都必须匹配当前运行的 DSH 运行时版本。1.1.7 的 4 个 DSH client peer 都声明为 `>=0.1.0-rc.6 <0.2.0`，因此启动时被拒绝，并给出用户可见警告：`dsh-usage-chart@1.1.7 与 DSH 0.2.1-rc.2 不兼容（要求 @deepseek-ai/dsh-client-locale >=0.1.0-rc.6 <0.2.0, ...）…`。现在 peer 范围同时覆盖两代 client SDK：
   - `@deepseek-ai/dsh-client-locale`、`@deepseek-ai/dsh-client-ui-conversation`、`@deepseek-ai/dsh-client-ui-slots` 的 peer 范围由 `>=0.1.0-rc.6 <0.2.0` 放宽为 `>=0.1.0-rc.6 <0.3.0-0`。上界带 `-0` 是因为 DSH 以 `includePrerelease` 比较范围：这样仍接受 0.2.x 预发布（如 0.2.1-rc.2），但不会把未来的 0.3.0 预发布提前放行。
   - 移除已退役的 `@deepseek-ai/dsh-client-runtime` peer。DSH 0.2.x 用 `dsh-client-modules` 模块系统（以及 `dsh-client-ui-renderer`、`dsh-client-ui-session` 标准套件与 `dsh-client-store`）取代了它；该包最后发布的版本为 `0.1.1-rc.2`，不存在兼容 0.2.x 的版本。
-  - 在代码层面继续支持 DSH 0.1.x：保留 0.1.x 的 `provenance`、`assistant/chunk` 与字符串型 `user/message.source` 路径，插件使用的接口在两条线上一致。0.2.1-rc.2 侧已对照本机安装的应用包与已发布的 0.2.1-rc.2 包类型声明核实：`conversation.composer.dock`、`conversation.chat.assistant-actions` 槽位仍存在且正常渲染；会话作用域标准属性仍提供 `useSession` / `sessionId` / `useProjection`（ui-session）与 `useChat`（ui-chat）；`useChat` 快照仍暴露 `legacy.nodes`；`tokenUsage` / `contextPressure` / `contextBreakdown` 投影字段不变；`ctx.locale.getLocale()` / `subscribe` 与 `ctx.slots.inject` / `register` 未变；宿主 `webServer.register` / `sessions.get` / `snapshotEvents` / `credentials.resolve` 服务未变。把 `dsh-client-runtime` 移出 `dsh.client.inject` 后，未在 0.1.x 上重新做实机安装测试。
+  - 在代码层面继续支持 DSH 0.1.x：保留 0.1.x 的 `provenance`、`assistant/chunk` 与 `user/message.source` 路径（该字段自 dsh-llm 0.1.0-rc.2 起同样为 `{ kind }` 对象，仅旧日志可能是裸字符串，折叠对两种形状都接受），插件使用的接口在两条线上一致。0.2.1-rc.2 侧已对照本机安装的应用包与已发布的 0.2.1-rc.2 包类型声明核实：`conversation.composer.dock`、`conversation.chat.assistant-actions` 槽位仍存在且正常渲染；会话作用域标准属性仍提供 `useSession` / `sessionId` / `useProjection`（ui-session）与 `useChat`（ui-chat）；`useChat` 快照仍暴露 `legacy.nodes`；`tokenUsage` / `contextPressure` / `contextBreakdown` 投影字段不变；`ctx.locale.getLocale()` / `subscribe` 与 `ctx.slots.inject` / `register` 未变；宿主 `webServer.register` / `sessions.get` / `snapshotEvents` / `credentials.resolve` 服务未变。把 `dsh-client-runtime` 移出 `dsh.client.inject` 后，未在 0.1.x 上重新做实机安装测试。
 - **适配 DSH 0.2.x 的助手节点模型识别**——助手节点的模型标识新增读取 0.2.x 的 `providerMetadata` 字段；存在 DSH 0.1.x 的 `provenance` 字段时仍优先使用，`requestConfig` 继续作为最后回退，0.2.x 下模型名称与逐条消息成本归因不再丢失。
 - **client 类型声明自包含**——生成的 client `.d.ts` 不再 import 已退役的 `@deepseek-ai/dsh-client-runtime` 包。在仅安装 0.2.x 的 DSH 环境做类型检查时，不会再因悬空导入（DSH 已不再提供该包）而失败；0.1.x 环境行为保持不变。
 - **适配 DSH 0.2.x 会话日志词汇**——DSH 0.2.x 移除了 `assistant/chunk` 事件，流式用量合并进 `assistant/message`（`usage` + `stream`）。宿主折叠现按官方 token-meter 的口径处理这类日志：
@@ -18,12 +18,13 @@
   - 0.2.x 把失败/重试的请求只记为 `assistant/attempt`（用量内嵌在 `stream` 中），这些用量现在也计入会话总量与每轮成本，重试前后的每次尝试分别计费。
   - TTFT 取流里首个携带 token 的记录：跳过 `block-start` / `usage` / `finish` 等结构记录与空片段；原始 `*-delta` chunk 与带工具名的 tool-call 片段即使参数为空也算 token。
   - 输出吞吐 = 输出 token ÷ 各条 `assistant/message` / `assistant/attempt` 流式时长之和，不再被工具执行与步骤间等待拉低；整轮输出只有一个片段时不报吞吐。没有流时间线的日志沿用 0.1.x 口径（首个 usage 样本 → 轮次结束）。
-  - `user/message.source` 由字符串改为 `{ kind }` 对象：`user` 与 `user-*` 归为 `human`，目标续跑与 Agent 类来源保留原名，`tool-jobs` 等其他运行时注入记为 `agent.<kind>`，来源标签不再把它们显示为人工。
+  - `user/message.source` 为 `{ kind }` 对象（0.1.x 自 dsh-llm 0.1.0-rc.2 起已是同一类型化形状，仅旧日志可能仍是裸字符串，折叠两种都接受）：`user` 与 `user-*` 归为 `human`，目标续跑与 Agent 类来源保留原名，`tool-jobs` 等其他运行时注入记为 `agent.<kind>`，来源标签不再把它们显示为人工。
 
 ### 发布准备
 
 - 同步 npm lockfile 根节点的 peer 范围与元数据，移除退役 runtime 条目，不升级已锁定的依赖版本。
 - npm 包收录双语 README 实际引用的截图文件名；同步双语文档、架构、路线图和发布检查清单；新增 lockfile 根元数据一致性与截图收录回归。
+- 对照 DSH 0.2.1-rc.2 官方发布说明与 `llm-deepseek` 模型目录核实：`DeepSeek-V4.1-Flash-1017` 的模型 id 仍为 `deepseek-flash`，1.1.5 起的费率表已覆盖，无需改价。准入校验有意保留 peer 范围回退、不声明 `engines.dsh`：DSH 0.2.x 在声明 `engines.dsh` 时优先按它判断，否则回退到 peer 范围（官方允许），而 peer 范围能让三个客户端 SDK 包分别受版本门禁约束。
 
 ### 测试
 

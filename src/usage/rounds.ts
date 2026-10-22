@@ -10,8 +10,9 @@
  * 跨版本事件词汇：0.1.x 的流式用量走 `assistant/chunk`，0.2.x 移除了该事件，
  * 用量与流内时间线合并进 `assistant/message`（`usage` + `stream`）。这里优先用
  * `stream` 的首/末时间戳计算 TTFT 与 TPS（0.2.x），流时间线缺席时回退到首个
- * usage 样本 / turn 结束时刻（0.1.x 及旧日志）。`user/message.source` 在 0.1.x
- * 是字符串，0.2.x 是 `{ kind }` 对象，两者都归一为归因字符串。
+ * usage 样本 / turn 结束时刻（0.1.x 及旧日志）。`user/message.source` 自
+ * dsh-llm 0.1.0-rc.2 起在两条线上都是 `{ kind }` 对象，仅更早的旧日志可能仍是
+ * 裸字符串；两种形状都归一为归因字符串。
  *
  * 纯函数：不读文件、不发起请求；价格来源经 `resolvePricing` 注入
  * （接缝），默认用内置刊例价。测试喂合成事件流即可断言全部字段。

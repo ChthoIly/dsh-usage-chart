@@ -287,7 +287,7 @@ dsh-usage-chart/
 
 | Component | Supported |
 |---|---|
-| DSH | Declared peer range: `>=0.1.0-rc.6 <0.3.0-0` (0.1.x / 0.2.x). The `/usage` route prefers `snapshotEvents()` with a legacy `events` fallback (`Session.events` was removed in `0.1.2-rc.1`). See validation scope below. |
+| DSH | Declared peer range: `>=0.1.0-rc.6 <0.3.0-0` (0.1.x / 0.2.x). DSH 0.2.x prefers `engines.dsh` when present and falls back to matching the `@deepseek-ai/dsh*` peer ranges otherwise; this plugin deliberately stays on the peer fallback so each client-SDK package stays version-gated. The `/usage` route prefers `snapshotEvents()` with a legacy `events` fallback (`Session.events` was removed in `0.1.2-rc.1`). See validation scope below. |
 | Node.js | ≥ 20 |
 | Web UI | React 18 / `conversation.composer.dock` + `conversation.chat.assistant-actions` |
 | OS | macOS, Linux, Windows (pure JavaScript, no native dependencies) |
